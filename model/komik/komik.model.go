@@ -2,11 +2,16 @@ package model_komik
 
 type Komik struct {
 	Title  string
-	Url    string
 	ImgUrl string
+	Slug   string
 }
 
 type KomikChapter struct {
-	Title      string
-	UrlChapter string
+	Title       string
+	SlugChapter string
+}
+
+type KomikPanel struct {
+	PanelNumber int
+	ImgUrl      string
 }

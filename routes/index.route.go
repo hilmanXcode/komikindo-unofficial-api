@@ -14,7 +14,9 @@ func InitRoute(app *gin.Engine) {
 
 	route.GET("/v1/search_komik", komik_controller.SearchKomik)
 
-	route.GET("/v1/get_all_chapter", komik_controller.GetAllChaptersKomik)
+	route.GET("/v1/get_all_chapter/:slug", komik_controller.GetAllChaptersKomik)
+
+	route.GET("/v1/get_panel_komik/:chapter", komik_controller.GetPanelKomik)
 
 	app.Run(":8000")
 }

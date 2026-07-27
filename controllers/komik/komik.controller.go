@@ -4,9 +4,11 @@ import (
 	"fmt"
 	model_komik "komikindo-scraper/model/komik"
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gocolly/colly/v2"
+	"github.com/gosimple/slug"
 )
 
 var provider_url = "https://komikindo.ch/"
@@ -18,6 +20,7 @@ func GetAllPopulerKomik(c *gin.Context) {
 
 	// Find and visit all links
 	cly.OnHTML(".serieslist.pop", func(e *colly.HTMLElement) {
+
 		titles := e.ChildAttrs("a", "title")
 
 		dataKomik = append(dataKomik, titles...)
@@ -60,12 +63,12 @@ func SearchKomik(c *gin.Context) {
 
 		e.ForEach("div.animepost", func(i int, el *colly.HTMLElement) {
 			titleKomik := el.ChildAttrs("a", "title")
-			urlKomik := el.ChildAttrs("a", "href")
 			imageUrl := el.ChildAttrs("img", "src")
+			titleSlug := strings.Replace(slug.Make(titleKomik[0]), "komik-", "", -1)
 
 			komikBaru := model_komik.Komik{
 				Title:  titleKomik[0],
-				Url:    urlKomik[0],
+				Slug:   slug.Make(titleSlug),
 				ImgUrl: imageUrl[0],
 			}
 
@@ -99,7 +102,10 @@ func SearchKomik(c *gin.Context) {
 }
 
 func GetAllChaptersKomik(c *gin.Context) {
-	url := c.Query("url")
+
+	slugKomik := c.Param("slug")
+
+	var url = provider_url + "komik/" + slugKomik
 
 	if url == "" {
 		c.JSON(http.StatusBadRequest, gin.H{
@@ -121,11 +127,11 @@ func GetAllChaptersKomik(c *gin.Context) {
 		e.ForEach("li>span.lchx", func(i int, el *colly.HTMLElement) {
 
 			titleChapter := el.ChildAttr("a", "title")
-			urlChapter := el.ChildAttr("a", "href")
+			slugChapter := strings.Replace(slug.Make(titleChapter), "komik-", "", -1)
 
 			komikChapter := model_komik.KomikChapter{
-				Title:      titleChapter,
-				UrlChapter: urlChapter,
+				Title:       titleChapter,
+				SlugChapter: slugChapter,
 			}
 
 			dataChapter = append(dataChapter, komikChapter)
@@ -141,7 +147,7 @@ func GetAllChaptersKomik(c *gin.Context) {
 	cly.Visit(url)
 
 	if len(dataChapter) == 0 {
-		c.JSON(http.StatusOK, gin.H{
+		c.JSON(http.StatusNoContent, gin.H{
 			"error":   "Komik tidak ditemukan",
 			"success": nil,
 			"data":    nil,
@@ -155,4 +161,66 @@ func GetAllChaptersKomik(c *gin.Context) {
 		"success": "Berhasil mengambil data komik",
 		"data":    dataChapter,
 	})
+}
+
+func GetPanelKomik(c *gin.Context) {
+	chapter := c.Param("chapter")
+
+	var url = provider_url + chapter
+
+	if url == "" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error":   "Parameter chapter tidak ditemukan",
+			"success": nil,
+			"data":    nil,
+		})
+
+		return
+	}
+
+	var dataPanel []model_komik.KomikPanel
+
+	cly := colly.NewCollector()
+
+	// Find and visit all links
+	cly.OnHTML("div#chimg-auh", func(e *colly.HTMLElement) {
+		images := e.ChildAttrs("img", "src")
+
+		panelNum := 1
+		for _, img := range images {
+
+			komikPanel := model_komik.KomikPanel{
+				PanelNumber: panelNum,
+				ImgUrl:      img,
+			}
+
+			dataPanel = append(dataPanel, komikPanel)
+
+			panelNum++
+		}
+
+	})
+
+	cly.OnRequest(func(r *colly.Request) {
+		fmt.Println("Visiting", url)
+	})
+
+	cly.Visit(url)
+
+	if len(dataPanel) == 0 {
+		c.JSON(http.StatusNoContent, gin.H{
+			"error":   "Data panel tidak ditemukan",
+			"success": nil,
+			"data":    nil,
+		})
+
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"error":   nil,
+		"success": "Berhasil mengambil data panel",
+		"data":    dataPanel,
+	})
+
 }
