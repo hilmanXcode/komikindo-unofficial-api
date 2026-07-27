@@ -2,7 +2,7 @@ package komik_controller
 
 import (
 	"fmt"
-	model "komikindo-scraper/model/komik"
+	model_komik "komikindo-scraper/model/komik"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -52,7 +52,7 @@ func SearchKomik(c *gin.Context) {
 	input := c.DefaultQuery("komik", "")
 	var url = fmt.Sprintf(`%s?s=%s`, provider_url, input)
 
-	var dataKomik []model.Komik
+	var dataKomik []model_komik.Komik
 	cly := colly.NewCollector()
 
 	// Find and visit all links
@@ -63,7 +63,7 @@ func SearchKomik(c *gin.Context) {
 			urlKomik := el.ChildAttrs("a", "href")
 			imageUrl := el.ChildAttrs("img", "src")
 
-			komikBaru := model.Komik{
+			komikBaru := model_komik.Komik{
 				Title:  titleKomik[0],
 				Url:    urlKomik[0],
 				ImgUrl: imageUrl[0],
@@ -71,8 +71,6 @@ func SearchKomik(c *gin.Context) {
 
 			dataKomik = append(dataKomik, komikBaru)
 		})
-
-		fmt.Println(dataKomik[1].Title)
 
 	})
 
@@ -98,4 +96,63 @@ func SearchKomik(c *gin.Context) {
 		"data":    dataKomik,
 	})
 
+}
+
+func GetAllChaptersKomik(c *gin.Context) {
+	url := c.Query("url")
+
+	if url == "" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error":   "Data url wajib di isi.",
+			"success": nil,
+			"data":    nil,
+		})
+
+		return
+	}
+
+	var dataChapter []model_komik.KomikChapter
+
+	cly := colly.NewCollector()
+
+	// Find and visit all links
+	cly.OnHTML("div#chapter_list", func(e *colly.HTMLElement) {
+
+		e.ForEach("li>span.lchx", func(i int, el *colly.HTMLElement) {
+
+			titleChapter := el.ChildAttr("a", "title")
+			urlChapter := el.ChildAttr("a", "href")
+
+			komikChapter := model_komik.KomikChapter{
+				Title:      titleChapter,
+				UrlChapter: urlChapter,
+			}
+
+			dataChapter = append(dataChapter, komikChapter)
+
+		})
+
+	})
+
+	cly.OnRequest(func(r *colly.Request) {
+		fmt.Println("Visiting", url)
+	})
+
+	cly.Visit(url)
+
+	if len(dataChapter) == 0 {
+		c.JSON(http.StatusOK, gin.H{
+			"error":   "Komik tidak ditemukan",
+			"success": nil,
+			"data":    nil,
+		})
+
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"error":   nil,
+		"success": "Berhasil mengambil data komik",
+		"data":    dataChapter,
+	})
 }
