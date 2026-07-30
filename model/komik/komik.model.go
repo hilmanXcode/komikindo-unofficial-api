@@ -1,17 +1,17 @@
 package model_komik
 
 type Komik struct {
-	Title  string
-	ImgUrl string
-	Slug   string
+	Title  string `json:"title"`
+	ImgUrl string `json:"imgurl"`
+	Slug   string `json:"slug"`
 }
 
 type KomikChapter struct {
-	Title       string
-	SlugChapter string
+	Title       string `json:"title"`
+	SlugChapter string `json:"slugchapter"`
 }
 
 type KomikPanel struct {
-	PanelNumber int
-	ImgUrl      string
+	PanelNumber int    `json:"panelnumber"`
+	ImgUrl      string `json:"imgurl"`
 }

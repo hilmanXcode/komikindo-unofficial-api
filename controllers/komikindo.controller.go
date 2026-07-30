@@ -1,7 +1,8 @@
-package komik_controller
+package controllers
 
 import (
 	"fmt"
+	"komikindo-scraper/helpers"
 	model_komik "komikindo-scraper/model/komik"
 	"net/http"
 	"strings"
@@ -11,19 +12,41 @@ import (
 	"github.com/gosimple/slug"
 )
 
+type KomikController struct {
+	Colly *colly.Collector
+}
+
+func NewKomikController(colly *colly.Collector) *KomikController {
+	return &KomikController{
+		Colly: colly,
+	}
+}
+
 var provider_url = "https://komikindo.ch/"
 
-func GetAllPopulerKomik(c *gin.Context) {
+func (controller *KomikController) GetAllPopulerKomik(c *gin.Context) {
 
-	var dataKomik []string
-	cly := colly.NewCollector()
+	var dataKomik []model_komik.Komik
+	cly := controller.Colly
 
 	// Find and visit all links
 	cly.OnHTML(".serieslist.pop", func(e *colly.HTMLElement) {
 
-		titles := e.ChildAttrs("a", "title")
+		e.ForEach("ul>li", func(i int, el *colly.HTMLElement) {
+			urlKomik := el.ChildAttr("a", "href")
+			titleKomik := el.ChildAttr("a", "title")
+			imgUrl := el.ChildAttr("img", "src")
+			slugKomik := strings.Replace(slug.Make(urlKomik), "https-komikindo-ch-komik-", "", -1)
 
-		dataKomik = append(dataKomik, titles...)
+			komikBaru := model_komik.Komik{
+				Title:  titleKomik,
+				ImgUrl: imgUrl,
+				Slug:   slugKomik,
+			}
+
+			dataKomik = append(dataKomik, komikBaru)
+		})
+
 	})
 
 	cly.OnRequest(func(r *colly.Request) {
@@ -32,44 +55,48 @@ func GetAllPopulerKomik(c *gin.Context) {
 
 	cly.Visit(provider_url)
 
-	if dataKomik != nil {
+	if dataKomik == nil {
 
-		c.JSON(http.StatusOK, gin.H{
-			"data":    dataKomik,
-			"error":   nil,
-			"success": "Berhasil mengambil data komik",
-		})
+		c.JSON(http.StatusRequestTimeout, helpers.APIResponse(
+			http.StatusRequestTimeout,
+			false,
+			"Gagal mengambil data komik",
+			nil,
+		))
 
 		return
 	}
 
-	c.JSON(http.StatusRequestTimeout, gin.H{
-		"data":    nil,
-		"error":   "Gagal mengambil data komik",
-		"success": nil,
-	})
+	c.JSON(http.StatusOK, helpers.APIResponse(
+		http.StatusOK,
+		true,
+		"Berhasil mengambil data komik",
+		dataKomik,
+	))
+
 }
 
-func SearchKomik(c *gin.Context) {
+func (controller *KomikController) SearchKomik(c *gin.Context) {
 
 	input := c.DefaultQuery("komik", "")
 	var url = fmt.Sprintf(`%s?s=%s`, provider_url, input)
 
 	var dataKomik []model_komik.Komik
-	cly := colly.NewCollector()
+	cly := controller.Colly
 
 	// Find and visit all links
 	cly.OnHTML(".film-list", func(e *colly.HTMLElement) {
 
 		e.ForEach("div.animepost", func(i int, el *colly.HTMLElement) {
-			titleKomik := el.ChildAttrs("a", "title")
-			imageUrl := el.ChildAttrs("img", "src")
-			titleSlug := strings.Replace(slug.Make(titleKomik[0]), "komik-", "", -1)
+			urlKomik := el.ChildAttr("a", "href")
+			titleKomik := el.ChildAttr("a", "title")
+			imageUrl := el.ChildAttr("img", "src")
+			titleSlug := strings.Replace(slug.Make(urlKomik), "https-komikindo-ch-komik-", "", -1)
 
 			komikBaru := model_komik.Komik{
-				Title:  titleKomik[0],
+				Title:  titleKomik,
 				Slug:   slug.Make(titleSlug),
-				ImgUrl: imageUrl[0],
+				ImgUrl: imageUrl,
 			}
 
 			dataKomik = append(dataKomik, komikBaru)
@@ -83,43 +110,46 @@ func SearchKomik(c *gin.Context) {
 
 	cly.Visit(url)
 
-	if dataKomik != nil {
-		c.JSON(http.StatusOK, gin.H{
-			"message": "success",
-			"error":   nil,
-			"data":    dataKomik,
-		})
+	if dataKomik == nil {
 
+		c.JSON(http.StatusNotFound, helpers.APIResponse(
+			http.StatusNotFound,
+			false,
+			"Gagal menemukan komik",
+			nil,
+		))
 		return
 	}
 
-	c.JSON(http.StatusNotFound, gin.H{
-		"message": nil,
-		"error":   "Data komik tidak ditemukan.",
-		"data":    dataKomik,
-	})
+	c.JSON(http.StatusOK, helpers.APIResponse(
+		http.StatusOK,
+		true,
+		"Komik ditemukan",
+		dataKomik,
+	))
 
 }
 
-func GetAllChaptersKomik(c *gin.Context) {
+func (controller *KomikController) GetAllChaptersKomik(c *gin.Context) {
 
 	slugKomik := c.Param("slug")
 
-	var url = provider_url + "komik/" + slugKomik
-
-	if url == "" {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error":   "Data url wajib di isi.",
-			"success": nil,
-			"data":    nil,
-		})
+	if slugKomik == "" {
+		c.JSON(http.StatusBadRequest, helpers.APIResponse(
+			http.StatusBadRequest,
+			false,
+			"Parameter slug tidak boleh kosong",
+			nil,
+		))
 
 		return
 	}
 
+	var url = provider_url + "komik/" + slugKomik
+
 	var dataChapter []model_komik.KomikChapter
 
-	cly := colly.NewCollector()
+	cly := controller.Colly
 
 	// Find and visit all links
 	cly.OnHTML("div#chapter_list", func(e *colly.HTMLElement) {
@@ -147,28 +177,28 @@ func GetAllChaptersKomik(c *gin.Context) {
 	cly.Visit(url)
 
 	if len(dataChapter) == 0 {
-		c.JSON(http.StatusNoContent, gin.H{
-			"error":   "Komik tidak ditemukan",
-			"success": nil,
-			"data":    nil,
-		})
+		c.JSON(http.StatusNoContent, helpers.APIResponse(
+			http.StatusNoContent,
+			false,
+			"Data chapter tidak ditemukan",
+			nil,
+		))
 
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"error":   nil,
-		"success": "Berhasil mengambil data komik",
-		"data":    dataChapter,
-	})
+	c.JSON(http.StatusOK, helpers.APIResponse(
+		http.StatusOK,
+		true,
+		"Berhasil mengambil data chapter",
+		dataChapter,
+	))
 }
 
-func GetPanelKomik(c *gin.Context) {
+func (controller *KomikController) GetPanelKomik(c *gin.Context) {
 	chapter := c.Param("chapter")
 
-	var url = provider_url + chapter
-
-	if url == "" {
+	if chapter == "" {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"error":   "Parameter chapter tidak ditemukan",
 			"success": nil,
@@ -177,6 +207,8 @@ func GetPanelKomik(c *gin.Context) {
 
 		return
 	}
+
+	var url = provider_url + chapter
 
 	var dataPanel []model_komik.KomikPanel
 
