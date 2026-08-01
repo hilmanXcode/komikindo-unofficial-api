@@ -4,14 +4,12 @@ import (
 	"komikindo-scraper/controllers"
 
 	"github.com/gin-gonic/gin"
-	"github.com/gocolly/colly/v2"
+	"gorm.io/gorm"
 )
 
-func InitRoute(app *gin.Engine) {
+func InitRoute(app *gin.Engine, db *gorm.DB) {
 
-	colly := colly.NewCollector()
-
-	komikindoController := controllers.NewKomikController(colly)
+	komikindoController := controllers.NewKomikController(db)
 
 	route := app
 

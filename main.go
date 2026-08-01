@@ -1,30 +1,28 @@
 package main
 
 import (
-	"fmt"
 	"komikindo-scraper/bootstrap"
-	"log"
-	"time"
 )
 
 func main() {
 
-	stop := make(chan struct{})
+	// stop := make(chan struct{})
 
-	go func() {
-		ticker := time.NewTicker(2 * time.Second) // Set your interval here
-		defer ticker.Stop()
+	// go func() {
+	// 	ticker := time.NewTicker(2 * time.Second) // Set your interval here
+	// 	defer ticker.Stop()
 
-		for {
-			select {
-			case <-ticker.C:
-				log.Println("Hello World")
-			case <-stop:
-				fmt.Println("Stopping worker...")
-				return
-			}
-		}
-	}()
+	// 	for {
+	// 		select {
+	// 		case <-ticker.C:
+	// 			log.Println("Hello World")
+	// 		case <-stop:
+	// 			fmt.Println("Stopping worker...")
+	// 			return
+	// 		}
+	// 	}
+	// }()
+
 	bootstrap.BootstrapApp()
 
 }

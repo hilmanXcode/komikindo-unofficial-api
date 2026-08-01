@@ -10,15 +10,16 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/gocolly/colly/v2"
 	"github.com/gosimple/slug"
+	"gorm.io/gorm"
 )
 
 type KomikController struct {
-	Colly *colly.Collector
+	db *gorm.DB
 }
 
-func NewKomikController(colly *colly.Collector) *KomikController {
+func NewKomikController(db *gorm.DB) *KomikController {
 	return &KomikController{
-		Colly: colly,
+		db: db,
 	}
 }
 
@@ -27,7 +28,7 @@ var provider_url = "https://komikindo.ch/"
 func (controller *KomikController) GetAllPopulerKomik(c *gin.Context) {
 
 	var dataKomik []model_komik.Komik
-	cly := controller.Colly
+	cly := colly.NewCollector()
 
 	// Find and visit all links
 	cly.OnHTML(".serieslist.pop", func(e *colly.HTMLElement) {
@@ -82,7 +83,7 @@ func (controller *KomikController) SearchKomik(c *gin.Context) {
 	var url = fmt.Sprintf(`%s?s=%s`, provider_url, input)
 
 	var dataKomik []model_komik.Komik
-	cly := controller.Colly
+	cly := colly.NewCollector()
 
 	// Find and visit all links
 	cly.OnHTML(".film-list", func(e *colly.HTMLElement) {
@@ -149,32 +150,70 @@ func (controller *KomikController) GetAllChaptersKomik(c *gin.Context) {
 
 	var dataChapter []model_komik.KomikChapter
 
-	cly := controller.Colly
+	result := controller.db.Where("slug_komik = ?", slugKomik).Find(&dataChapter)
 
-	// Find and visit all links
-	cly.OnHTML("div#chapter_list", func(e *colly.HTMLElement) {
+	if result.Error != nil {
 
-		e.ForEach("li>span.lchx", func(i int, el *colly.HTMLElement) {
+		c.JSON(
+			http.StatusInternalServerError,
+			helpers.APIResponse(
+				http.StatusInternalServerError,
+				false,
+				"Gagal mengambil data chapter",
+				nil,
+			),
+		)
+		return
 
-			titleChapter := el.ChildAttr("a", "title")
-			slugChapter := strings.Replace(slug.Make(titleChapter), "komik-", "", -1)
+	}
 
-			komikChapter := model_komik.KomikChapter{
-				Title:       titleChapter,
-				SlugChapter: slugChapter,
+	if len(dataChapter) == 0 {
+		// fmt.Println("DATA GAK ADA")
+		fmt.Println("MASUK KE COLLECT")
+
+		cly := colly.NewCollector()
+
+		// Find and visit all links
+		cly.OnHTML("div#chapter_list", func(e *colly.HTMLElement) {
+
+			e.ForEach("li>span.lchx", func(i int, el *colly.HTMLElement) {
+
+				titleChapter := el.ChildAttr("a", "title")
+				slugChapter := strings.Replace(slug.Make(titleChapter), "komik-", "", -1)
+
+				komikChapter := model_komik.KomikChapter{
+					Title:       titleChapter,
+					SlugChapter: slugChapter,
+					SlugKomik:   slugKomik,
+				}
+
+				dataChapter = append(dataChapter, komikChapter)
+			})
+
+			result := controller.db.Create(&dataChapter)
+
+			if result.Error != nil {
+				c.JSON(
+					http.StatusInternalServerError,
+					helpers.APIResponse(
+						http.StatusInternalServerError,
+						false,
+						"Gagal menginsert data ke database",
+						nil,
+					),
+				)
+
+				return
 			}
-
-			dataChapter = append(dataChapter, komikChapter)
 
 		})
 
-	})
+		cly.OnRequest(func(r *colly.Request) {
+			fmt.Println("Visiting", url)
+		})
 
-	cly.OnRequest(func(r *colly.Request) {
-		fmt.Println("Visiting", url)
-	})
-
-	cly.Visit(url)
+		cly.Visit(url)
+	}
 
 	if len(dataChapter) == 0 {
 		c.JSON(http.StatusNoContent, helpers.APIResponse(
@@ -212,47 +251,76 @@ func (controller *KomikController) GetPanelKomik(c *gin.Context) {
 
 	var dataPanel []model_komik.KomikPanel
 
-	cly := colly.NewCollector()
+	result := controller.db.Where("slug_chapter = ?", chapter).Find(&dataPanel)
 
-	// Find and visit all links
-	cly.OnHTML("div#chimg-auh", func(e *colly.HTMLElement) {
-		images := e.ChildAttrs("img", "src")
-
-		panelNum := 1
-		for _, img := range images {
-
-			komikPanel := model_komik.KomikPanel{
-				PanelNumber: panelNum,
-				ImgUrl:      img,
-			}
-
-			dataPanel = append(dataPanel, komikPanel)
-
-			panelNum++
-		}
-
-	})
-
-	cly.OnRequest(func(r *colly.Request) {
-		fmt.Println("Visiting", url)
-	})
-
-	cly.Visit(url)
-
-	if len(dataPanel) == 0 {
-		c.JSON(http.StatusNoContent, gin.H{
-			"error":   "Data panel tidak ditemukan",
-			"success": nil,
-			"data":    nil,
-		})
+	if result.Error != nil {
+		c.JSON(
+			http.StatusInternalServerError,
+			helpers.APIResponse(
+				http.StatusInternalServerError,
+				false,
+				"Gagal mengambild data panel",
+				nil,
+			),
+		)
 
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"error":   nil,
-		"success": "Berhasil mengambil data panel",
-		"data":    dataPanel,
-	})
+	if len(dataPanel) == 0 {
+
+		fmt.Println("MASUK KE COLLECT")
+
+		cly := colly.NewCollector()
+
+		// Find and visit all links
+		cly.OnHTML("div#chimg-auh", func(e *colly.HTMLElement) {
+			images := e.ChildAttrs("img", "src")
+
+			panelNum := 1
+			for _, img := range images {
+
+				komikPanel := model_komik.KomikPanel{
+					SlugChapter: chapter,
+					PanelNumber: panelNum,
+					ImgUrl:      img,
+				}
+
+				dataPanel = append(dataPanel, komikPanel)
+
+				panelNum++
+			}
+
+			result := controller.db.Create(&dataPanel)
+
+			if result.Error != nil {
+				c.JSON(
+					http.StatusInternalServerError,
+					helpers.APIResponse(
+						http.StatusInternalServerError,
+						false,
+						"Gagal menginsert data ke database",
+						nil,
+					),
+				)
+
+				return
+			}
+
+		})
+
+		cly.OnRequest(func(r *colly.Request) {
+			fmt.Println("Visiting", url)
+		})
+
+		cly.Visit(url)
+	}
+
+	c.JSON(http.StatusOK, helpers.APIResponse(
+		http.StatusOK,
+		true,
+		"Berhasil mengambil data panel",
+		dataPanel,
+	))
 
 }

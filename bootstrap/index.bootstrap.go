@@ -1,6 +1,7 @@
 package bootstrap
 
 import (
+	"komikindo-scraper/config"
 	"komikindo-scraper/routes"
 	"log"
 	"net"
@@ -19,8 +20,12 @@ func BootstrapApp() {
 
 	}
 
+	config.LoadEnvVariables()
+
+	db := config.InitDatabase()
+
 	app := gin.Default()
 
-	routes.InitRoute(app)
+	routes.InitRoute(app, db)
 
 }
