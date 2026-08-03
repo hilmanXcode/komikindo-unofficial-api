@@ -1,21 +1,25 @@
 package model_komik
 
+import "gorm.io/gorm"
+
 type Komik struct {
-	Id     int
-	Title  string `json:"title"`
-	ImgUrl string `json:"imgurl"`
-	Slug   string `json:"slug"`
+	gorm.Model
+	Title        string         `json:"title"`
+	ImgUrl       string         `json:"imgurl"`
+	Slug         string         `json:"slug"`
+	Description  string         `json:"description"`
+	KomikChapter []KomikChapter `gorm:"foreignKey:KomikId"`
 }
 
 type KomikChapter struct {
-	Id          int
+	gorm.Model
 	Title       string `json:"title"`
 	SlugChapter string `json:"slugchapter"`
-	SlugKomik   string `json:"slugkomik"`
+	KomikId     string `json:"komikid"`
 }
 
 type KomikPanel struct {
-	Id          int
+	gorm.Model
 	SlugChapter string
 	PanelNumber int    `json:"panelnumber"`
 	ImgUrl      string `json:"imgurl"`

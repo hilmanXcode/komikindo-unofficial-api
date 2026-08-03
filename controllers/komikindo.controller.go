@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"komikindo-scraper/helpers"
 	model_komik "komikindo-scraper/model/komik"
+	"log"
 	"net/http"
 	"strings"
 
@@ -148,9 +149,10 @@ func (controller *KomikController) GetAllChaptersKomik(c *gin.Context) {
 
 	var url = provider_url + "komik/" + slugKomik
 
-	var dataChapter []model_komik.KomikChapter
+	// var dataChapter []model_komik.KomikChapter
+	var dataKomik model_komik.Komik
 
-	result := controller.db.Where("slug_komik = ?", slugKomik).Find(&dataChapter)
+	result := controller.db.Preload("KomikChapter").Where("slug = ?", slugKomik).Find(&dataKomik)
 
 	if result.Error != nil {
 
@@ -159,7 +161,7 @@ func (controller *KomikController) GetAllChaptersKomik(c *gin.Context) {
 			helpers.APIResponse(
 				http.StatusInternalServerError,
 				false,
-				"Gagal mengambil data chapter",
+				"Gagal mengambil data chapter, "+result.Error.Error(),
 				nil,
 			),
 		)
@@ -167,11 +169,36 @@ func (controller *KomikController) GetAllChaptersKomik(c *gin.Context) {
 
 	}
 
-	if len(dataChapter) == 0 {
-		// fmt.Println("DATA GAK ADA")
-		fmt.Println("MASUK KE COLLECT")
+	if dataKomik.Slug == "" {
 
 		cly := colly.NewCollector()
+
+		cly.OnHTML(".infoanime", func(e *colly.HTMLElement) {
+
+			title := e.ChildText(".entry-title")
+			description := e.ChildText(".infox .shortcsc.sht2>p")
+			imgurl := e.ChildAttr(".thumb>img", "src")
+
+			dataKomik.Title = strings.Join(strings.Fields(title), " ")
+			dataKomik.Description = strings.Join(strings.Fields(description), " ")
+			dataKomik.Slug = slugKomik
+			dataKomik.ImgUrl = imgurl
+
+			// dataKomik = model_komik.Komik{
+			// 	Title:       strings.Join(strings.Fields(title), " "),
+			// 	Description: strings.Join(strings.Fields(description), " "),
+			// 	Slug:        slugKomik,
+			// 	ImgUrl:      imgurl,
+			// }
+
+			// result := controller.db.Create(&dataKomik)
+
+			if result.Error != nil {
+				log.Fatal("Gagal menginsert ke database")
+				return
+			}
+
+		})
 
 		// Find and visit all links
 		cly.OnHTML("div#chapter_list", func(e *colly.HTMLElement) {
@@ -184,13 +211,12 @@ func (controller *KomikController) GetAllChaptersKomik(c *gin.Context) {
 				komikChapter := model_komik.KomikChapter{
 					Title:       titleChapter,
 					SlugChapter: slugChapter,
-					SlugKomik:   slugKomik,
 				}
 
-				dataChapter = append(dataChapter, komikChapter)
+				dataKomik.KomikChapter = append(dataKomik.KomikChapter, komikChapter)
 			})
 
-			result := controller.db.Create(&dataChapter)
+			result := controller.db.Create(&dataKomik)
 
 			if result.Error != nil {
 				c.JSON(
@@ -215,7 +241,7 @@ func (controller *KomikController) GetAllChaptersKomik(c *gin.Context) {
 		cly.Visit(url)
 	}
 
-	if len(dataChapter) == 0 {
+	if len(dataKomik.KomikChapter) == 0 || dataKomik.Title == "" {
 		c.JSON(http.StatusNoContent, helpers.APIResponse(
 			http.StatusNoContent,
 			false,
@@ -230,7 +256,7 @@ func (controller *KomikController) GetAllChaptersKomik(c *gin.Context) {
 		http.StatusOK,
 		true,
 		"Berhasil mengambil data chapter",
-		dataChapter,
+		dataKomik,
 	))
 }
 
