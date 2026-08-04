@@ -8,7 +8,8 @@ import (
 )
 
 var (
-	DSN string
+	DSN     string
+	API_KEY string
 )
 
 func LoadEnvVariables() {
@@ -18,4 +19,5 @@ func LoadEnvVariables() {
 	}
 
 	DSN = os.Getenv("DATABASE_DSN")
+	API_KEY = os.Getenv("SECRET_SELF_API_KEY")
 }

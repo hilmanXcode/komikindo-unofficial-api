@@ -2,6 +2,7 @@ package routes
 
 import (
 	"komikindo-scraper/controllers"
+	"komikindo-scraper/middleware"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -9,9 +10,13 @@ import (
 
 func InitRoute(app *gin.Engine, db *gorm.DB) {
 
-	komikindoController := controllers.NewKomikController(db)
+	komikindoController := controllers.NewKomikindoController(db)
 
 	route := app
+
+	route.Use(middleware.RateLimiter(2, 5))
+	route.Use(middleware.RequireApiKey())
+	route.Use(gin.Recovery())
 
 	route.GET("/v1/populer_komik", komikindoController.GetAllPopulerKomik)
 

@@ -8,14 +8,15 @@ type Komik struct {
 	ImgUrl       string         `json:"imgurl"`
 	Slug         string         `json:"slug"`
 	Description  string         `json:"description"`
+	Status       string         `json:"status"`
 	KomikChapter []KomikChapter `gorm:"foreignKey:KomikId"`
 }
 
 type KomikChapter struct {
 	gorm.Model
 	Title       string `json:"title"`
-	SlugChapter string `json:"slugchapter"`
-	KomikId     string `json:"komikid"`
+	SlugChapter string `json:"slugchapter" gorm:"uniqueIndex:idx_comic_chapter"`
+	KomikId     string `json:"komikid" gorm:"uniqueIndex:idx_comic_chapter"`
 }
 
 type KomikPanel struct {
@@ -23,4 +24,8 @@ type KomikPanel struct {
 	SlugChapter string
 	PanelNumber int    `json:"panelnumber"`
 	ImgUrl      string `json:"imgurl"`
+}
+
+type KomikList struct {
+	Komik []Komik
 }

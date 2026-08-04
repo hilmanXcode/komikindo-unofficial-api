@@ -14,19 +14,19 @@ import (
 	"gorm.io/gorm"
 )
 
-type KomikController struct {
+type KomikindoController struct {
 	db *gorm.DB
 }
 
-func NewKomikController(db *gorm.DB) *KomikController {
-	return &KomikController{
+func NewKomikindoController(db *gorm.DB) *KomikindoController {
+	return &KomikindoController{
 		db: db,
 	}
 }
 
 var provider_url = "https://komikindo.ch/"
 
-func (controller *KomikController) GetAllPopulerKomik(c *gin.Context) {
+func (controller *KomikindoController) GetAllPopulerKomik(c *gin.Context) {
 
 	var dataKomik []model_komik.Komik
 	cly := colly.NewCollector()
@@ -78,7 +78,7 @@ func (controller *KomikController) GetAllPopulerKomik(c *gin.Context) {
 
 }
 
-func (controller *KomikController) SearchKomik(c *gin.Context) {
+func (controller *KomikindoController) SearchKomik(c *gin.Context) {
 
 	input := c.DefaultQuery("komik", "")
 	var url = fmt.Sprintf(`%s?s=%s`, provider_url, input)
@@ -132,7 +132,7 @@ func (controller *KomikController) SearchKomik(c *gin.Context) {
 
 }
 
-func (controller *KomikController) GetAllChaptersKomik(c *gin.Context) {
+func (controller *KomikindoController) GetAllChaptersKomik(c *gin.Context) {
 
 	slugKomik := c.Param("slug")
 
@@ -177,6 +177,7 @@ func (controller *KomikController) GetAllChaptersKomik(c *gin.Context) {
 
 			title := e.ChildText(".entry-title")
 			description := e.ChildText(".infox .shortcsc.sht2>p")
+			status := e.ChildText(".infox .spe>span")
 			imgurl := e.ChildAttr(".thumb>img", "src")
 
 			dataKomik.Title = strings.Join(strings.Fields(title), " ")
@@ -184,14 +185,11 @@ func (controller *KomikController) GetAllChaptersKomik(c *gin.Context) {
 			dataKomik.Slug = slugKomik
 			dataKomik.ImgUrl = imgurl
 
-			// dataKomik = model_komik.Komik{
-			// 	Title:       strings.Join(strings.Fields(title), " "),
-			// 	Description: strings.Join(strings.Fields(description), " "),
-			// 	Slug:        slugKomik,
-			// 	ImgUrl:      imgurl,
-			// }
-
-			// result := controller.db.Create(&dataKomik)
+			if strings.Contains(strings.ToLower(status), "tamat") {
+				dataKomik.Status = "Tamat"
+			} else {
+				dataKomik.Status = "Berjalan"
+			}
 
 			if result.Error != nil {
 				log.Fatal("Gagal menginsert ke database")
@@ -260,7 +258,7 @@ func (controller *KomikController) GetAllChaptersKomik(c *gin.Context) {
 	))
 }
 
-func (controller *KomikController) GetPanelKomik(c *gin.Context) {
+func (controller *KomikindoController) GetPanelKomik(c *gin.Context) {
 	chapter := c.Param("chapter")
 
 	if chapter == "" {
@@ -294,8 +292,6 @@ func (controller *KomikController) GetPanelKomik(c *gin.Context) {
 	}
 
 	if len(dataPanel) == 0 {
-
-		fmt.Println("MASUK KE COLLECT")
 
 		cly := colly.NewCollector()
 
