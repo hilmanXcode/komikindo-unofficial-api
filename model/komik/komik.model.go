@@ -15,7 +15,7 @@ type Komik struct {
 type KomikChapter struct {
 	gorm.Model
 	Title       string `json:"title"`
-	SlugChapter string `json:"slugchapter" gorm:"uniqueIndex:idx_comic_chapter"`
+	SlugChapter string `json:"slugchapter" gorm:"size:255 uniqueIndex:idx_comic_chapter"`
 	KomikId     string `json:"komikid" gorm:"uniqueIndex:idx_comic_chapter"`
 }
 
