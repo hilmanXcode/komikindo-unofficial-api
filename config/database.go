@@ -4,12 +4,12 @@ import (
 	model_komik "komikindo-scraper/model/komik"
 	"log"
 
-	"gorm.io/driver/mysql"
+	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )
 
 func InitDatabase() *gorm.DB {
-	db, err := gorm.Open(mysql.Open(DSN), &gorm.Config{})
+	db, err := gorm.Open(postgres.Open(DSN), &gorm.Config{})
 
 	if err != nil {
 		log.Fatal("Gagal terkoneksi ke database ", err)
