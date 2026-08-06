@@ -18,6 +18,8 @@ func InitRoute(app *gin.Engine, db *gorm.DB) {
 	route.Use(middleware.RequireApiKey())
 	route.Use(gin.Recovery())
 
+	route.GET("/v1/get_all_komik", komikindoController.GetAllScrapedKomik)
+
 	route.GET("/v1/populer_komik", komikindoController.GetAllPopulerKomik)
 
 	route.GET("/v1/search_komik", komikindoController.SearchKomik)

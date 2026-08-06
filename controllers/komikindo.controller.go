@@ -26,18 +26,51 @@ func NewKomikindoController(db *gorm.DB) *KomikindoController {
 
 var provider_url = "https://komikindo.ch/"
 
+func (controller *KomikindoController) GetAllScrapedKomik(c *gin.Context) {
+
+	var dataKomik []model_komik.Komik
+
+	if controller.db.Find(&dataKomik).Error != nil {
+		c.JSON(
+			http.StatusInternalServerError,
+			helpers.APIResponse(
+				http.StatusInternalServerError,
+				false,
+				"Gagal mengambil data komik di database",
+				nil,
+			),
+		)
+		return
+	}
+
+	c.JSON(
+		http.StatusOK,
+		helpers.APIResponse(
+			http.StatusOK,
+			true,
+			"Berhasil Mengambil Data",
+			dataKomik,
+		),
+	)
+
+}
+
 func (controller *KomikindoController) GetAllPopulerKomik(c *gin.Context) {
 
 	var dataKomik []model_komik.Komik
 	cly := colly.NewCollector()
 
 	// Find and visit all links
-	cly.OnHTML(".serieslist.pop", func(e *colly.HTMLElement) {
 
-		e.ForEach("ul>li", func(i int, el *colly.HTMLElement) {
-			urlKomik := el.ChildAttr("a", "href")
-			titleKomik := el.ChildAttr("a", "title")
-			imgUrl := el.ChildAttr("img", "src")
+	cly.OnHTML("div.odadingslider", func(e *colly.HTMLElement) {
+
+		// fmt.Println(e.Body)
+		e.ForEach(".animepost", func(i int, el *colly.HTMLElement) {
+			urlKomik := el.ChildAttr(".animposx>a", "href")
+
+			// fmt.Println(urlKomik)
+			titleKomik := el.ChildAttr(".animposx>a", "title")
+			imgUrl := el.ChildAttr(".animposx>a .limit>img", "src")
 			slugKomik := strings.Replace(slug.Make(urlKomik), "https-komikindo-ch-komik-", "", -1)
 
 			komikBaru := model_komik.Komik{
