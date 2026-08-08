@@ -17,7 +17,10 @@ func InitRoute(app *gin.Engine, db *gorm.DB) {
 	route := app
 
 	route.Use(cors.New(cors.Config{
-		AllowOrigins:     []string{"https://my-app-navy-kappa-j7tvzh852l.vercel.app"},
+		AllowOrigins: []string{
+			"https://my-app-navy-kappa-j7tvzh852l.vercel.app",
+			"https://mangainaja.my.id",
+		},
 		AllowMethods:     []string{"GET"},
 		AllowHeaders:     []string{"Authorization"},
 		AllowCredentials: true,
