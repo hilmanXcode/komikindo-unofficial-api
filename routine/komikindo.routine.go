@@ -9,11 +9,17 @@ import (
 	"gorm.io/gorm"
 )
 
-func KomikindoRoutine(dataKomik []model_komik.Komik, scraperKomikindo *scraper.ScraperKomikindo, db *gorm.DB) {
-	go scraperSavedKomik(dataKomik, scraperKomikindo, db)
+var dataKomik []model_komik.Komik
+
+func KomikindoRoutine(db *gorm.DB) {
+	// scraping kembali semua komik yang sudah ada di database dan status nya itu berjalan
+	scraperKomikindo := scraper.NewScraperKomikindo(db)
+	go scraperSavedKomik(db, scraperKomikindo)
+
+	// other routine goes hereeeee
 }
 
-func scraperSavedKomik(dataKomik []model_komik.Komik, scraperKomikindo *scraper.ScraperKomikindo, db *gorm.DB) {
+func scraperSavedKomik(db *gorm.DB, scraperKomikindo *scraper.ScraperKomikindo) {
 	ticker := time.NewTicker(12 * time.Second)
 	defer ticker.Stop()
 

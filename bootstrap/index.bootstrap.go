@@ -3,10 +3,8 @@ package bootstrap
 import (
 	"komikindo-scraper/config"
 	"komikindo-scraper/helpers"
-	model_komik "komikindo-scraper/model/komik"
 	"komikindo-scraper/routes"
 	"komikindo-scraper/routine"
-	"komikindo-scraper/scraper"
 	"log"
 
 	"github.com/gin-gonic/gin"
@@ -25,13 +23,9 @@ func BootstrapApp() {
 
 	db := config.InitDatabase()
 
-	scraperKomikindo := scraper.NewScraperKomikindo(db)
-
 	app := gin.Default()
 
-	var dataKomik []model_komik.Komik
-
-	routine.KomikindoRoutine(dataKomik, scraperKomikindo, db)
+	routine.KomikindoRoutine(db)
 
 	routes.InitRoute(app, db)
 
