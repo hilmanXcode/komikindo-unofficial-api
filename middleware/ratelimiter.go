@@ -26,21 +26,25 @@ var store = IPStore{
 	clients: make(map[string]*client),
 }
 
-func CleanupIps() {
-	go func() {
-		for {
-			time.Sleep(1 * time.Minute)
-			store.mu.Lock()
+func init() {
+	go CleanupIps()
+}
 
-			fmt.Println("Menjalankan cleanup IP")
-			for ip, client := range store.clients {
-				if time.Since(client.lastSeen) > 3*time.Minute {
-					delete(store.clients, ip)
-				}
+func CleanupIps() {
+
+	for {
+		time.Sleep(1 * time.Minute)
+		store.mu.Lock()
+
+		fmt.Println("Menjalankan cleanup IP")
+		for ip, client := range store.clients {
+			if time.Since(client.lastSeen) > 3*time.Minute {
+				delete(store.clients, ip)
 			}
-			store.mu.Unlock()
 		}
-	}()
+		store.mu.Unlock()
+	}
+
 }
 
 // RateLimiter enforces a request frequency cap per client IP
