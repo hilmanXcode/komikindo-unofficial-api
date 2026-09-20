@@ -1,7 +1,7 @@
 package middleware
 
 import (
-	"fmt"
+	"komikindo-scraper/helpers"
 	"net/http"
 	"sync"
 	"time"
@@ -18,55 +18,63 @@ type client struct {
 
 // IPStore manages thread-safe access to your client mapping
 type IPStore struct {
-	mu      sync.RWMutex
+	mu      sync.Mutex
 	clients map[string]*client
 }
 
-var store = IPStore{
-	clients: make(map[string]*client),
+func newIPStore() *IPStore {
+	store := &IPStore{clients: make(map[string]*client)}
+	go store.cleanup()
+
+	return store
 }
 
-func init() {
-	go CleanupIps()
-}
-
-func CleanupIps() {
+func (s *IPStore) cleanup() {
 
 	for {
 		time.Sleep(1 * time.Minute)
-		store.mu.Lock()
+		s.mu.Lock()
 
-		fmt.Println("Menjalankan cleanup IP")
-		for ip, client := range store.clients {
+		for ip, client := range s.clients {
 			if time.Since(client.lastSeen) > 3*time.Minute {
-				delete(store.clients, ip)
+				delete(s.clients, ip)
 			}
 		}
-		store.mu.Unlock()
+		s.mu.Unlock()
 	}
 
 }
 
-// RateLimiter enforces a request frequency cap per client IP
+func (s *IPStore) limiterFor(ip string, r rate.Limit, b int) *rate.Limiter {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	val, exists := s.clients[ip]
+	if !exists {
+		// rate.NewLimiter takes tokens per second (r) and burst size (b)
+		val = &client{limiter: rate.NewLimiter(r, b)}
+		s.clients[ip] = val
+	}
+	val.lastSeen = time.Now()
+
+	return val.limiter
+}
+
+// RateLimiter enforces a request frequency cap per client IP.
+// Setiap pemanggilan menghasilkan store sendiri, jadi beberapa rate limiter
+// dengan batas berbeda bisa dipasang pada grup route yang berbeda tanpa saling
+// menimpa.
 func RateLimiter(r rate.Limit, b int) gin.HandlerFunc {
+	store := newIPStore()
+
 	return func(c *gin.Context) {
-		ip := c.ClientIP()
-
-		store.mu.Lock()
-		val, exists := store.clients[ip]
-		if !exists {
-			// rate.NewLimiter takes tokens per second (r) and burst size (b)
-			val = &client{limiter: rate.NewLimiter(r, b)}
-			store.clients[ip] = val
-		}
-		val.lastSeen = time.Now()
-		store.mu.Unlock()
-
-		// If the token bucket is empty, reject the request immediately
-		if !val.limiter.Allow() {
-			c.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{
-				"error": "Too many requests.",
-			})
+		if !store.limiterFor(c.ClientIP(), r, b).Allow() {
+			c.AbortWithStatusJSON(http.StatusTooManyRequests, helpers.APIResponse(
+				http.StatusTooManyRequests,
+				false,
+				"Too many requests.",
+				nil,
+			))
 			return
 		}
 

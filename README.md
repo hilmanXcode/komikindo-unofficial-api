@@ -13,7 +13,12 @@ REST API tidak resmi untuk mengambil data komik dari [Komikindo](https://komikin
 - 🖼️ **Panel Komik** — Ambil semua gambar panel dari chapter tertentu
 - ⏱️ **Auto-Scraping** — Background routine yang otomatis update chapter baru setiap 12 jam
 - 🛡️ **Rate Limiting** — Proteksi API dengan rate limiter per IP
-- 🔑 **API Key Auth** — Autentikasi via header `Authorization`
+- 🔑 **API Key Auth** — Autentikasi aplikasi via header `X-API-Key`
+- 👤 **Akun User (JWT)** — Register, login, refresh token dengan rotasi, dan manajemen sesi → [dokumentasi](AUTHENTICATION.md)
+- 🔖 **Bookmark** — Simpan komik favorit per user
+- 📖 **Riwayat Baca** — Lanjutkan membaca dari chapter & panel terakhir
+- 👮 **Role Admin** — Kelola akun user dan status aktifnya
+- 🩺 **Health Check** — Endpoint `/health` publik untuk uptime monitoring
 
 ---
 
@@ -56,20 +61,33 @@ komikindo-scraper/
 │   ├── database.go                  # Koneksi dan migrasi MySQL (GORM)
 │   └── loadenv.go                   # Load environment variables
 ├── controllers/
-│   └── komikindo.controller.go      # Handler untuk semua endpoint API
+│   ├── komikindo.controller.go      # Handler untuk endpoint komik
+│   ├── auth.controller.go           # Handler register, login, refresh, profil
+│   ├── user.controller.go           # Handler bookmark, riwayat baca, admin
+│   ├── health.controller.go         # Handler health check
+│   └── pagination.go                # Parsing query paginasi & meta
 ├── helpers/
 │   ├── response.go                  # Standar format response JSON
+│   ├── auth.go                      # bcrypt, token acak, hash
+│   ├── jwt.go                       # Pembuatan & validasi access token
 │   └── utils.go                     # Utility (cek koneksi provider)
 ├── middleware/
 │   ├── apikey.go                    # Middleware autentikasi API Key
+│   ├── auth.go                      # Middleware JWT: RequireAuth, RequireRole
 │   └── ratelimiter.go               # Middleware rate limiter per IP
 ├── model/
-│   └── komik/
-│       └── komik.model.go           # Model: Komik, KomikChapter, KomikPanel
+│   ├── komik/
+│   │   └── komik.model.go           # Model: Komik, KomikChapter, KomikPanel
+│   └── user/
+│       └── user.model.go            # Model: User, RefreshToken, Bookmark, ReadingHistory
 ├── routes/
 │   └── index.route.go               # Definisi semua route API
 ├── scraper/
 │   └── komikindo_scraper.go         # Background scraper untuk update chapter
+├── routine/
+│   ├── komikindo.routine.go         # Routine update chapter berkala
+│   └── auth.routine.go              # Routine pembersihan refresh token
+├── AUTHENTICATION.md                # Dokumentasi autentikasi & fitur user
 ├── .env.example                     # Template environment variables
 ├── go.mod                           # Go module dependencies
 └── start.sh                         # Script untuk menjalankan app
@@ -104,12 +122,40 @@ komikindo-scraper/
    ```env
    DATABASE_DSN="username:password@tcp(127.0.0.1:3306)/db_komik?parseTime=true"
    SECRET_SELF_API_KEY="your-secret-api-key"
+   JWT_SECRET="hasil-dari-openssl-rand-hex-32"
    ```
 
-   | Variable              | Deskripsi                                |
-   | --------------------- | ---------------------------------------- |
-   | `DATABASE_DSN`        | Connection string MySQL (format GORM)    |
-   | `SECRET_SELF_API_KEY` | API key untuk autentikasi setiap request |
+   | Variable              | Wajib | Default | Deskripsi                                     |
+   | --------------------- | ----- | ------- | --------------------------------------------- |
+   | `DATABASE_DSN`        | ✅    | —       | Connection string MySQL (format GORM)         |
+   | `SECRET_SELF_API_KEY` | ✅    | —       | API key aplikasi, dikirim lewat `X-API-Key`   |
+   | `JWT_SECRET`          | ✅    | —       | Kunci tanda tangan JWT, **minimal 32 karakter** |
+   | `ACCESS_TOKEN_TTL`    | ❌    | `15m`   | Umur access token                             |
+   | `REFRESH_TOKEN_TTL`   | ❌    | `720h`  | Umur refresh token (30 hari)                  |
+   | `MAX_LOGIN_ATTEMPTS`  | ❌    | `5`     | Gagal login sebelum akun dikunci              |
+   | `LOGIN_LOCK_DURATION` | ❌    | `15m`   | Lama akun dikunci                             |
+   | `PORT`                | ❌    | `8000`  | Port HTTP server                              |
+   | `CORS_ORIGINS`        | ❌    | localhost 5173/4173 + domain produksi | Origin browser yang diizinkan, dipisah koma |
+   | `RATE_LIMIT_RPS`      | ❌    | `10`    | Request per detik per IP untuk `/v1`          |
+   | `RATE_LIMIT_BURST`    | ❌    | `30`    | Burst rate limit `/v1`                        |
+   | `TRUSTED_PROXIES`     | ❌    | semua   | Proxy yang `X-Forwarded-For`-nya dipercaya, dipisah koma |
+
+   Generate `JWT_SECRET` dengan:
+
+   ```bash
+   openssl rand -hex 32
+   ```
+
+   > ⚠️ Aplikasi **menolak start** kalau `JWT_SECRET` kosong/kurang dari 32 karakter,
+   > atau kalau `SECRET_SELF_API_KEY` kosong.
+
+   File `.env` hanya untuk development. Di production cukup set environment
+   variable lewat platform — ketiadaan file `.env` bukan error.
+
+   **Rate limit dan IP pengunjung.** Limit dihitung per IP. Kalau ada proxy di
+   depan aplikasi (frontend SSR, CDN, nginx), IP yang dipakai diambil dari header
+   `X-Forwarded-For`. Isi `TRUSTED_PROXIES` dengan IP proxy tersebut di production
+   supaya pengunjung tidak bisa memalsukan IP untuk menghindari rate limit.
 
 3. **Install dependencies**
 
@@ -144,22 +190,33 @@ komikindo-scraper/
 
 ## 🔐 Autentikasi
 
-Semua endpoint memerlukan API Key yang dikirim melalui header `Authorization`.
+API ini punya dua lapis keamanan dengan tugas berbeda:
+
+| Lapis | Header | Menjawab | Berlaku di |
+|-------|--------|----------|------------|
+| **API Key** | `X-API-Key` | *Aplikasi mana yang memanggil?* | Semua endpoint `/v1/**` |
+| **Access Token (JWT)** | `Authorization: Bearer <token>` | *User mana yang sedang login?* | Endpoint bookmark, riwayat, & admin |
+
+Endpoint komik (search, chapter, panel) cukup dengan API key:
 
 ```
-Authorization: your-secret-api-key
+X-API-Key: your-secret-api-key
 ```
 
-Jika API key tidak valid atau tidak disertakan, API akan mengembalikan:
+> Klien lama yang mengirim API key lewat header `Authorization` **tetap berfungsi**, selama isinya bukan token `Bearer`.
+
+Jika API key tidak valid atau tidak disertakan:
 
 ```json
 {
   "success": false,
   "message": "Invalid API KEY",
-  "code": 400,
+  "code": 401,
   "data": null
 }
 ```
+
+📖 **Autentikasi user (register, login, JWT, bookmark, riwayat baca, admin) didokumentasikan terpisah di [AUTHENTICATION.md](AUTHENTICATION.md).**
 
 ---
 
@@ -184,11 +241,22 @@ Semua endpoint mengembalikan response dengan format standar:
 
 ### 1. Get All Komik
 
-Mengambil semua data komik yang sudah tersimpan di database.
+Mengambil data komik yang sudah tersimpan di database.
 
 ```
 GET /v1/get_all_komik
 ```
+
+**Query Parameters** (semuanya opsional)
+
+| Parameter | Deskripsi                                        |
+| --------- | ------------------------------------------------ |
+| `q`       | Cari berdasarkan judul                           |
+| `status`  | Filter `Berjalan` atau `Tamat`                   |
+| `page`    | Nomor halaman, mulai dari 1                      |
+| `limit`   | Jumlah per halaman, default 20, maksimal 100     |
+
+> Tanpa `page` dan `limit`, endpoint ini mengembalikan **seluruh data** seperti sebelumnya. Kalau salah satunya dikirim, response akan membawa blok `meta` berisi info paginasi.
 
 **Response** `200 OK`
 
@@ -366,20 +434,25 @@ GET /v1/get_panel_komik/one-piece-chapter-1100
 
 ## ⚠️ Rate Limiting
 
-API menggunakan rate limiter per IP address:
+API menggunakan rate limiter per IP address, dengan batas terpisah untuk endpoint autentikasi:
 
-| Setting            | Nilai                |
-| ------------------ | -------------------- |
-| Rate               | 2 request/detik      |
-| Burst              | 5 request             |
-| IP Cleanup         | Setiap 1 menit       |
-| IP Expiry          | 3 menit tidak aktif   |
+| Setting            | Endpoint `/v1/**`    | Endpoint `/v1/auth/**` |
+| ------------------ | -------------------- | ---------------------- |
+| Rate               | 2 request/detik      | 10 request/menit       |
+| Burst              | 5 request            | 5 request              |
+| IP Cleanup         | Setiap 1 menit       | Setiap 1 menit         |
+| IP Expiry          | 3 menit tidak aktif  | 3 menit tidak aktif    |
+
+Selain itu ada penguncian akun setelah 5x gagal login — lihat [AUTHENTICATION.md](AUTHENTICATION.md).
 
 Jika melebihi limit:
 
 ```json
 {
-  "error": "Too many requests."
+  "success": false,
+  "message": "Too many requests.",
+  "code": 429,
+  "data": null
 }
 ```
 
@@ -448,20 +521,50 @@ GORM akan otomatis membuat tabel berikut:
 ## 📜 Contoh Penggunaan (cURL)
 
 ```bash
+KEY="your-api-key"
+
 # 1. Ambil semua komik
-curl -H "Authorization: your-api-key" http://localhost:8000/v1/get_all_komik
+curl -H "X-API-Key: $KEY" http://localhost:8000/v1/get_all_komik
+
+# 1b. Dengan filter dan paginasi
+curl -H "X-API-Key: $KEY" "http://localhost:8000/v1/get_all_komik?q=piece&status=Berjalan&page=1&limit=10"
 
 # 2. Ambil komik populer
-curl -H "Authorization: your-api-key" http://localhost:8000/v1/populer_komik
+curl -H "X-API-Key: $KEY" http://localhost:8000/v1/populer_komik
 
 # 3. Cari komik
-curl -H "Authorization: your-api-key" "http://localhost:8000/v1/search_komik?komik=one+piece"
+curl -H "X-API-Key: $KEY" "http://localhost:8000/v1/search_komik?komik=one+piece"
 
 # 4. Ambil semua chapter
-curl -H "Authorization: your-api-key" http://localhost:8000/v1/get_all_chapter/one-piece
+curl -H "X-API-Key: $KEY" http://localhost:8000/v1/get_all_chapter/one-piece
 
 # 5. Ambil panel chapter
-curl -H "Authorization: your-api-key" http://localhost:8000/v1/get_panel_komik/one-piece-chapter-1100
+curl -H "X-API-Key: $KEY" http://localhost:8000/v1/get_panel_komik/one-piece-chapter-1100
+
+# 6. Health check (tanpa API key)
+curl http://localhost:8000/health
+```
+
+Contoh alur user (selengkapnya di [AUTHENTICATION.md](AUTHENTICATION.md)):
+
+```bash
+KEY="your-api-key"
+
+# Login, ambil access token
+TOKEN=$(curl -s -X POST http://localhost:8000/v1/auth/login \
+  -H "X-API-Key: $KEY" -H "Content-Type: application/json" \
+  -d '{"identifier":"bilal","password":"rahasia123"}' \
+  | python3 -c "import sys,json;print(json.load(sys.stdin)['data']['access_token'])")
+
+# Simpan komik ke bookmark
+curl -X POST http://localhost:8000/v1/bookmarks \
+  -H "X-API-Key: $KEY" -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"komik_slug":"one-piece"}'
+
+# Lihat bookmark
+curl -H "X-API-Key: $KEY" -H "Authorization: Bearer $TOKEN" \
+  http://localhost:8000/v1/bookmarks
 ```
 
 ---

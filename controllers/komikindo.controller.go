@@ -26,11 +26,68 @@ func NewKomikindoController(db *gorm.DB) *KomikindoController {
 
 var provider_url = "https://komikindo.ch/"
 
+// GetAllScrapedKomik mengembalikan komik yang sudah tersimpan di database.
+//
+// Mendukung query `q` (cari judul), `status`, `page`, dan `limit`. Tanpa `page`
+// atau `limit` endpoint ini tetap mengembalikan seluruh data seperti versi
+// sebelumnya, supaya klien lama tidak ikut berubah perilakunya.
 func (controller *KomikindoController) GetAllScrapedKomik(c *gin.Context) {
 
 	var dataKomik []model_komik.Komik
 
-	if controller.db.Find(&dataKomik).Error != nil {
+	query := controller.db.Model(&model_komik.Komik{})
+
+	if keyword := strings.TrimSpace(c.Query("q")); keyword != "" {
+		query = query.Where("title LIKE ?", "%"+keyword+"%")
+	}
+
+	if status := strings.TrimSpace(c.Query("status")); status != "" {
+		query = query.Where("status = ?", status)
+	}
+
+	// Session() supaya query bisa dipakai ulang untuk Count dan Find tanpa
+	// kondisi dari pemanggilan pertama ikut terbawa.
+	query = query.Session(&gorm.Session{})
+
+	if !isPaginated(c) {
+		if query.Find(&dataKomik).Error != nil {
+			c.JSON(
+				http.StatusInternalServerError,
+				helpers.APIResponse(
+					http.StatusInternalServerError,
+					false,
+					"Gagal mengambil data komik di database",
+					nil,
+				),
+			)
+			return
+		}
+
+		c.JSON(
+			http.StatusOK,
+			helpers.APIResponse(
+				http.StatusOK,
+				true,
+				"Berhasil Mengambil Data",
+				dataKomik,
+			),
+		)
+
+		return
+	}
+
+	page, limit := parsePagination(c, 20)
+
+	var total int64
+	query.Count(&total)
+
+	err := query.
+		Order("title asc").
+		Limit(limit).
+		Offset((page - 1) * limit).
+		Find(&dataKomik).Error
+
+	if err != nil {
 		c.JSON(
 			http.StatusInternalServerError,
 			helpers.APIResponse(
@@ -45,11 +102,12 @@ func (controller *KomikindoController) GetAllScrapedKomik(c *gin.Context) {
 
 	c.JSON(
 		http.StatusOK,
-		helpers.APIResponse(
+		helpers.APIResponseWithMeta(
 			http.StatusOK,
 			true,
 			"Berhasil Mengambil Data",
 			dataKomik,
+			buildMeta(page, limit, total),
 		),
 	)
 
