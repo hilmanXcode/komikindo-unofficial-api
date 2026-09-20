@@ -9,8 +9,6 @@ import (
 	"gorm.io/gorm"
 )
 
-var dataKomik []model_komik.Komik
-
 func KomikindoRoutine(db *gorm.DB) {
 	// scraping kembali semua komik yang sudah ada di database dan status nya itu berjalan
 	scraperKomikindo := scraper.NewScraperKomikindo(db)
@@ -25,11 +23,15 @@ func scraperSavedKomik(db *gorm.DB, scraperKomikindo *scraper.ScraperKomikindo) 
 
 	for range ticker.C {
 
+		var dataKomik []model_komik.Komik
+
 		result := db.Preload("KomikChapter").Where("status = 'Berjalan'").Find(&dataKomik)
 
+		// Database yang sedang bermasalah cukup membuat putaran ini dilewati,
+		// bukan menghentikan API. Putaran berikutnya mencoba lagi.
 		if result.Error != nil {
-			log.Fatal("Gagal mendapatkan data komik saat scraping")
-			return
+			log.Println("Gagal mendapatkan data komik saat scraping:", result.Error)
+			continue
 		}
 
 		for _, v := range dataKomik {

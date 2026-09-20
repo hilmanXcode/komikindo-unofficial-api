@@ -1,7 +1,6 @@
 package scraper
 
 import (
-	"fmt"
 	model_komik "komikindo-scraper/model/komik"
 	"log"
 	"strconv"
@@ -52,22 +51,36 @@ func (s *ScraperKomikindo) ScrapeChapterKomik(komik model_komik.Komik) {
 	})
 
 	cly.OnRequest(func(r *colly.Request) {
-		fmt.Println("Visiting", url)
+		log.Println("Scraping chapter:", url)
 	})
 
-	cly.Visit(url)
-
-	if len(dataKomik) != len(komik.KomikChapter) {
-		err := s.db.Clauses(clause.OnConflict{
-			DoNothing: true,
-		}).Create(&dataKomik).Error
-
-		if err != nil {
-			log.Fatal("Gagal menginsert data komik baru:", err.Error())
-			return
-		}
-
-		fmt.Println("Berhasil menambahkan data baru melalui go routine")
+	if err := cly.Visit(url); err != nil {
+		log.Println("Gagal membuka", url, ":", err)
+		return
 	}
 
+	// Provider yang sedang down, halaman yang hilang, atau struktur HTML yang
+	// berubah membuat daftar chapter kosong. Tanpa penjagaan ini GORM menolak
+	// insert dengan "empty slice found".
+	if len(dataKomik) == 0 {
+		log.Println("Tidak ada chapter terbaca untuk", komik.Slug, ", halaman dilewati")
+		return
+	}
+
+	if len(dataKomik) == len(komik.KomikChapter) {
+		return
+	}
+
+	err := s.db.Clauses(clause.OnConflict{
+		DoNothing: true,
+	}).Create(&dataKomik).Error
+
+	// Kegagalan menyimpan satu komik tidak boleh mematikan API: routine ini
+	// jalan di latar belakang, jadi errornya dicatat lalu dilanjutkan.
+	if err != nil {
+		log.Println("Gagal menyimpan chapter untuk", komik.Slug, ":", err)
+		return
+	}
+
+	log.Println("Chapter baru tersimpan untuk", komik.Slug)
 }

@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"komikindo-scraper/helpers"
 	model_komik "komikindo-scraper/model/komik"
-	"log"
 	"net/http"
 	"strings"
 
@@ -282,11 +281,6 @@ func (controller *KomikindoController) GetAllChaptersKomik(c *gin.Context) {
 				dataKomik.Status = "Berjalan"
 			}
 
-			if result.Error != nil {
-				log.Fatal("Gagal menginsert ke database")
-				return
-			}
-
 		})
 
 		// Find and visit all links
@@ -304,6 +298,10 @@ func (controller *KomikindoController) GetAllChaptersKomik(c *gin.Context) {
 
 				dataKomik.KomikChapter = append(dataKomik.KomikChapter, komikChapter)
 			})
+
+			if dataKomik.Title == "" || len(dataKomik.KomikChapter) == 0 {
+				return
+			}
 
 			result := controller.db.Create(&dataKomik)
 
@@ -402,6 +400,12 @@ func (controller *KomikindoController) GetPanelKomik(c *gin.Context) {
 				dataPanel = append(dataPanel, komikPanel)
 
 				panelNum++
+			}
+
+			// Chapter yang gambarnya gagal terbaca menghasilkan slice kosong,
+			// dan Create menolaknya dengan "empty slice found".
+			if len(dataPanel) == 0 {
+				return
 			}
 
 			result := controller.db.Create(&dataPanel)
