@@ -5,6 +5,7 @@ import (
 	"komikindo-scraper/helpers"
 	model_komik "komikindo-scraper/model/komik"
 	"net/http"
+	neturl "net/url"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -145,7 +146,9 @@ func (controller *KomikindoController) GetAllPopulerKomik(c *gin.Context) {
 		fmt.Println("Visiting", r.URL)
 	})
 
-	cly.Visit(provider_url)
+	if err := cly.Visit(provider_url); err != nil {
+		fmt.Println("Gagal membuka", provider_url, ":", err)
+	}
 
 	if dataKomik == nil {
 
@@ -171,7 +174,7 @@ func (controller *KomikindoController) GetAllPopulerKomik(c *gin.Context) {
 func (controller *KomikindoController) SearchKomik(c *gin.Context) {
 
 	input := c.DefaultQuery("komik", "")
-	var url = fmt.Sprintf(`%s?s=%s`, provider_url, input)
+	var url = fmt.Sprintf(`%s?s=%s`, provider_url, neturl.QueryEscape(input))
 
 	var dataKomik []model_komik.Komik
 	cly := colly.NewCollector()
@@ -200,7 +203,9 @@ func (controller *KomikindoController) SearchKomik(c *gin.Context) {
 		fmt.Println("Visiting", r.URL)
 	})
 
-	cly.Visit(url)
+	if err := cly.Visit(url); err != nil {
+		fmt.Println("Gagal membuka", url, ":", err)
+	}
 
 	if dataKomik == nil {
 
@@ -325,7 +330,9 @@ func (controller *KomikindoController) GetAllChaptersKomik(c *gin.Context) {
 			fmt.Println("Visiting", url)
 		})
 
-		cly.Visit(url)
+		if err := cly.Visit(url); err != nil {
+			fmt.Println("Gagal membuka", url, ":", err)
+		}
 	}
 
 	if len(dataKomik.KomikChapter) == 0 || dataKomik.Title == "" {
@@ -430,7 +437,9 @@ func (controller *KomikindoController) GetPanelKomik(c *gin.Context) {
 			fmt.Println("Visiting", url)
 		})
 
-		cly.Visit(url)
+		if err := cly.Visit(url); err != nil {
+			fmt.Println("Gagal membuka", url, ":", err)
+		}
 	}
 
 	c.JSON(http.StatusOK, helpers.APIResponse(
