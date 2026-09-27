@@ -1,11 +1,18 @@
 package bootstrap
 
 import (
+	"context"
+	"errors"
 	"komikindo-scraper/config"
 	"komikindo-scraper/helpers"
 	"komikindo-scraper/routes"
 	"komikindo-scraper/routine"
 	"log"
+	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
 
 	"github.com/gin-gonic/gin"
 )
@@ -41,4 +48,37 @@ func BootstrapApp() {
 
 	routes.InitRoute(app, db)
 
+	// Timeout mencegah koneksi lambat atau menggantung menghabiskan resource.
+	// WriteTimeout dibuat longgar karena satu request bisa menunggu scraping
+	// provider (timeout Colly 20 detik).
+	server := &http.Server{
+		Addr:              ":" + config.PORT,
+		Handler:           app,
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      60 * time.Second,
+		IdleTimeout:       120 * time.Second,
+	}
+
+	// Docker mengirim SIGTERM saat container dihentikan atau diperbarui.
+	// Request yang sedang berjalan diberi waktu selesai dulu.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	go func() {
+		log.Println("Server berjalan di port", config.PORT)
+		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Fatal("Server berhenti: ", err)
+		}
+	}()
+
+	<-ctx.Done()
+	log.Println("Mematikan server...")
+
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	if err := server.Shutdown(shutdownCtx); err != nil {
+		log.Println("Server dimatikan paksa:", err)
+	}
 }

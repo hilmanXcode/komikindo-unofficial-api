@@ -2,6 +2,7 @@ package scraper
 
 import (
 	"errors"
+	model_komik "komikindo-scraper/model/komik"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -39,6 +40,17 @@ const chapterPage = `<html><body><div id="chimg-auh">
 <img src="https://img.example/1.jpeg" alt="Magic Emperor Chapter 910" onError="this.onerror=null;"/><img src="https://img.example/2.jpeg" alt="Magic Emperor Chapter 910"/>
 </div></body></html>`
 
+const card = `<div class="animepost"><div class="animposx">
+  <a href="https://komikindo.ch/komik/545921-revenge-of-the-iron-blooded-sword-hound/" itemprop="url" title="Komik Revenge Of The Iron-Blooded Sword Hound" rel="bookmark">
+    <div class="limit"><div class="ply"></div>
+      <img src="https://komikindo.ch/wp-content/uploads/2023/04/cover-223x319.jpg" itemprop="image" /></div>
+  </a>
+  <div class="bigors"><div class="tt"><h3><a href="https://komikindo.ch/komik/545921-revenge-of-the-iron-blooded-sword-hound/">Revenge</a></h3></div></div>
+</div></div>`
+
+const homePage = `<html><body><div class="odadingslider">` + card + `</div></body></html>`
+const searchPage = `<html><body><div class="film-list">` + card + `</div></body></html>`
+
 func TestFetch(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -46,6 +58,14 @@ func TestFetch(t *testing.T) {
 			w.Write([]byte(komikPage))
 		case "/magic-emperor-chapter-910":
 			w.Write([]byte(chapterPage))
+		case "/":
+			if r.URL.Query().Get("s") == "revenge" {
+				w.Write([]byte(searchPage))
+			} else if r.URL.Query().Has("s") {
+				w.Write([]byte("<html><body><div class=\"film-list\"></div></body></html>"))
+			} else {
+				w.Write([]byte(homePage))
+			}
 		default:
 			w.Write([]byte("<html><body>kosong</body></html>"))
 		}
@@ -79,6 +99,28 @@ func TestFetch(t *testing.T) {
 	}
 	if len(panels) != 2 || panels[1].PanelNumber != 2 || panels[1].ImgUrl != "https://img.example/2.jpeg" {
 		t.Errorf("panel = %+v", panels)
+	}
+
+	for name, fetch := range map[string]func() ([]model_komik.Komik, error){
+		"populer": FetchPopuler,
+		"search":  func() ([]model_komik.Komik, error) { return Search("revenge") },
+	} {
+		list, err := fetch()
+		if err != nil {
+			t.Fatal(name, err)
+		}
+		if len(list) != 1 || list[0].Slug != "545921-revenge-of-the-iron-blooded-sword-hound" ||
+			list[0].Title != "Komik Revenge Of The Iron-Blooded Sword Hound" ||
+			list[0].ImgUrl != "https://komikindo.ch/wp-content/uploads/2023/04/cover-223x319.jpg" {
+			t.Errorf("%s = %+v", name, list)
+		}
+	}
+
+	if _, err := Search("tidak-ada"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("pencarian kosong: err = %v, mau ErrNotFound", err)
+	}
+	if LastSuccess().IsZero() {
+		t.Error("LastSuccess belum terisi setelah scraping berhasil")
 	}
 
 	if _, err := FetchKomik("tidak-ada"); !errors.Is(err, ErrNotFound) {

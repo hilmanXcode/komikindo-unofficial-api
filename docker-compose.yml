@@ -1,0 +1,52 @@
+# Menjalankan API dan MySQL. Keduanya otomatis hidup lagi kalau crash atau
+# server reboot (restart: unless-stopped).
+#
+#   docker compose up -d --build     # jalankan / perbarui
+#   docker compose logs -f api       # lihat log
+#
+# Semua variabel dibaca dari file .env di folder ini (lihat .env.example).
+
+services:
+  db:
+    image: mysql:8.4
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: db_komik
+      MYSQL_USER: komik
+      MYSQL_PASSWORD: ${DB_PASSWORD:?isi DB_PASSWORD di .env}
+      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:?isi DB_ROOT_PASSWORD di .env}
+    volumes:
+      - db-data:/var/lib/mysql
+    # mysqladmin ping bernilai sukses selama server hidup, tanpa perlu login.
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    logging: &logging
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  api:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file: .env
+    environment:
+      DATABASE_DSN: "komik:${DB_PASSWORD}@tcp(db:3306)/db_komik?parseTime=true"
+      TZ: Asia/Jakarta
+    # Hanya bisa diakses dari server ini sendiri. Reverse proxy (Nginx/Caddy)
+    # atau Cloudflare Tunnel yang meneruskannya ke internet.
+    ports:
+      - "127.0.0.1:${PORT:-8000}:${PORT:-8000}"
+    # Beri waktu request yang sedang berjalan untuk selesai saat update.
+    stop_grace_period: 20s
+    logging: *logging
+
+volumes:
+  db-data:

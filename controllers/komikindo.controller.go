@@ -8,12 +8,10 @@ import (
 	"komikindo-scraper/scraper"
 	"log"
 	"net/http"
-	neturl "net/url"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/gocolly/colly/v2"
-	"github.com/gosimple/slug"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -115,52 +113,19 @@ func (controller *KomikindoController) GetAllScrapedKomik(c *gin.Context) {
 
 }
 
+// GetAllPopulerKomik mengambil komik populer dari halaman depan provider.
+// Hasilnya di-cache karena endpoint ini dipanggil setiap homepage dibuka.
 func (controller *KomikindoController) GetAllPopulerKomik(c *gin.Context) {
 
-	var dataKomik []model_komik.Komik
-	cly := colly.NewCollector()
-
-	// Find and visit all links
-
-	cly.OnHTML("div.odadingslider", func(e *colly.HTMLElement) {
-
-		// fmt.Println(e.Body)
-		e.ForEach(".animepost", func(i int, el *colly.HTMLElement) {
-			urlKomik := el.ChildAttr(".animposx>a", "href")
-
-			// fmt.Println(urlKomik)
-			titleKomik := el.ChildAttr(".animposx>a", "title")
-			imgUrl := el.ChildAttr(".animposx>a .limit>img", "src")
-			slugKomik := strings.Replace(slug.Make(urlKomik), "https-komikindo-ch-komik-", "", -1)
-
-			komikBaru := model_komik.Komik{
-				Title:  titleKomik,
-				ImgUrl: imgUrl,
-				Slug:   slugKomik,
-			}
-
-			dataKomik = append(dataKomik, komikBaru)
-		})
-
-	})
-
-	cly.OnRequest(func(r *colly.Request) {
-		fmt.Println("Visiting", r.URL)
-	})
-
-	if err := cly.Visit(scraper.ProviderURL); err != nil {
-		fmt.Println("Gagal membuka", scraper.ProviderURL, ":", err)
-	}
-
-	if dataKomik == nil {
-
+	dataKomik, err := cached("populer", 10*time.Minute, scraper.FetchPopuler)
+	if err != nil {
+		log.Println("Gagal mengambil komik populer:", err)
 		c.JSON(http.StatusRequestTimeout, helpers.APIResponse(
 			http.StatusRequestTimeout,
 			false,
 			"Gagal mengambil data komik",
 			nil,
 		))
-
 		return
 	}
 
@@ -175,48 +140,14 @@ func (controller *KomikindoController) GetAllPopulerKomik(c *gin.Context) {
 
 func (controller *KomikindoController) SearchKomik(c *gin.Context) {
 
-	input := c.DefaultQuery("komik", "")
-	var url = fmt.Sprintf(`%s?s=%s`, scraper.ProviderURL, neturl.QueryEscape(input))
+	keyword := strings.ToLower(strings.TrimSpace(c.Query("komik")))
 
-	var dataKomik []model_komik.Komik
-	cly := colly.NewCollector()
-
-	// Find and visit all links
-	cly.OnHTML(".film-list", func(e *colly.HTMLElement) {
-
-		e.ForEach("div.animepost", func(i int, el *colly.HTMLElement) {
-			urlKomik := el.ChildAttr("a", "href")
-			titleKomik := el.ChildAttr("a", "title")
-			imageUrl := el.ChildAttr("img", "src")
-			titleSlug := strings.Replace(slug.Make(urlKomik), "https-komikindo-ch-komik-", "", -1)
-
-			komikBaru := model_komik.Komik{
-				Title:  titleKomik,
-				Slug:   slug.Make(titleSlug),
-				ImgUrl: imageUrl,
-			}
-
-			dataKomik = append(dataKomik, komikBaru)
-		})
-
+	dataKomik, err := cached("search:"+keyword, 5*time.Minute, func() ([]model_komik.Komik, error) {
+		return scraper.Search(keyword)
 	})
-
-	cly.OnRequest(func(r *colly.Request) {
-		fmt.Println("Visiting", r.URL)
-	})
-
-	if err := cly.Visit(url); err != nil {
-		fmt.Println("Gagal membuka", url, ":", err)
-	}
-
-	if dataKomik == nil {
-
-		c.JSON(http.StatusNotFound, helpers.APIResponse(
-			http.StatusNotFound,
-			false,
-			"Gagal menemukan komik",
-			nil,
-		))
+	if err != nil {
+		log.Println("Gagal mencari komik", keyword, ":", err)
+		notFound(c, "Gagal menemukan komik")
 		return
 	}
 
@@ -252,27 +183,17 @@ func (controller *KomikindoController) GetAllChaptersKomik(c *gin.Context) {
 	}
 
 	if dataKomik.ID == 0 {
-		dataKomik, err = scraper.FetchKomik(slugKomik)
+		dataKomik, err = cached("komik:"+slugKomik, time.Minute, func() (model_komik.Komik, error) {
+			return controller.scrapeKomik(slugKomik)
+		})
 		if err != nil {
-			log.Println("Gagal scraping komik", slugKomik, ":", err)
-			notFound(c, "Data chapter tidak ditemukan")
-			return
-		}
-
-		if err := controller.db.Create(&dataKomik).Error; err != nil {
-			if !errors.Is(err, gorm.ErrDuplicatedKey) {
-				log.Println("Gagal menyimpan komik", slugKomik, ":", err)
+			log.Println("Gagal mengambil komik", slugKomik, ":", err)
+			if errors.Is(err, errDatabase) {
 				internalError(c, "Gagal menyimpan data komik")
-				return
+			} else {
+				notFound(c, "Data chapter tidak ditemukan")
 			}
-
-			// Request lain menyimpan komik yang sama lebih dulu, pakai versi
-			// yang sudah ada di database.
-			if dataKomik, err = controller.findKomik(slugKomik); err != nil {
-				log.Println("Gagal mengambil komik", slugKomik, ":", err)
-				internalError(c, "Gagal mengambil data chapter")
-				return
-			}
+			return
 		}
 	}
 
@@ -287,6 +208,33 @@ func (controller *KomikindoController) GetAllChaptersKomik(c *gin.Context) {
 		"Berhasil mengambil data chapter",
 		dataKomik,
 	))
+}
+
+// errDatabase membedakan kegagalan database (500) dari komik yang memang tidak
+// ada di provider (404).
+var errDatabase = errors.New("database")
+
+// scrapeKomik mengambil komik yang belum tersimpan dari provider lalu
+// menyimpannya.
+func (controller *KomikindoController) scrapeKomik(slugKomik string) (model_komik.Komik, error) {
+	komik, err := scraper.FetchKomik(slugKomik)
+	if err != nil {
+		return komik, err
+	}
+
+	if err := controller.db.Create(&komik).Error; err != nil {
+		if !errors.Is(err, gorm.ErrDuplicatedKey) {
+			return komik, fmt.Errorf("%w: %v", errDatabase, err)
+		}
+
+		// Instance lain menyimpan komik yang sama lebih dulu, pakai versi yang
+		// sudah ada di database.
+		if komik, err = controller.findKomik(slugKomik); err != nil {
+			return komik, fmt.Errorf("%w: %v", errDatabase, err)
+		}
+	}
+
+	return komik, nil
 }
 
 // findKomik mengembalikan komik beserta chapter-nya, atau Komik kosong (ID 0)
@@ -321,20 +269,24 @@ func (controller *KomikindoController) GetPanelKomik(c *gin.Context) {
 	}
 
 	if len(dataPanel) == 0 {
-		dataPanel, err = scraper.FetchPanels(chapter)
+		dataPanel, err = cached("panel:"+chapter, time.Minute, func() ([]model_komik.KomikPanel, error) {
+			return controller.refreshPanels(chapter)
+		})
 		if err != nil {
 			log.Println("Gagal scraping panel", chapter, ":", err)
 			notFound(c, "Data panel tidak ditemukan")
 			return
 		}
-
-		// Dua pembaca yang membuka chapter baru bersamaan sama-sama men-scrape;
-		// unique index idx_chapter_panel memastikan panelnya tidak tersimpan dua
-		// kali. Gagal menyimpan tidak menghalangi user membaca, request
-		// berikutnya akan mencoba lagi.
-		if err := controller.db.Clauses(clause.OnConflict{DoNothing: true}).Create(&dataPanel).Error; err != nil {
-			log.Println("Gagal menyimpan panel", chapter, ":", err)
-		}
+	} else if time.Since(dataPanel[0].CreatedAt) > panelMaxAge {
+		// Panel lama tetap dikirim sekarang; pembaruannya jalan di latar
+		// belakang, paling sering sekali per 10 menit per chapter supaya
+		// provider yang sedang down tidak dibanjiri percobaan ulang.
+		go cached("panel-refresh:"+chapter, 10*time.Minute, func() (struct{}, error) {
+			if _, err := controller.refreshPanels(chapter); err != nil {
+				log.Println("Gagal memperbarui panel", chapter, ":", err)
+			}
+			return struct{}{}, nil
+		})
 	}
 
 	c.JSON(http.StatusOK, helpers.APIResponse(
@@ -344,6 +296,33 @@ func (controller *KomikindoController) GetPanelKomik(c *gin.Context) {
 		dataPanel,
 	))
 
+}
+
+// panelMaxAge umur panel sebelum di-scrape ulang. Provider sering berganti
+// domain gambar, jadi URL panel yang tersimpan lama-lama mati.
+const panelMaxAge = 3 * 24 * time.Hour
+
+// refreshPanels men-scrape panel chapter lalu mengganti yang tersimpan. Gagal
+// menyimpan tidak menghalangi user membaca, panel hasil scraping tetap
+// dikembalikan dan request berikutnya mencoba menyimpan lagi.
+func (controller *KomikindoController) refreshPanels(chapter string) ([]model_komik.KomikPanel, error) {
+	panels, err := scraper.FetchPanels(chapter)
+	if err != nil {
+		return nil, err
+	}
+
+	// Satu transaksi supaya pembaca lain tidak pernah melihat chapter kosong.
+	err = controller.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Unscoped().Where("slug_chapter = ?", chapter).Delete(&model_komik.KomikPanel{}).Error; err != nil {
+			return err
+		}
+		return tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&panels).Error
+	})
+	if err != nil {
+		log.Println("Gagal menyimpan panel", chapter, ":", err)
+	}
+
+	return panels, nil
 }
 
 func notFound(c *gin.Context, message string) {

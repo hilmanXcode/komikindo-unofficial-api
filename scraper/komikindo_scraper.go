@@ -7,6 +7,8 @@ import (
 	"net/url"
 	"path"
 	"strings"
+	"sync/atomic"
+	"time"
 
 	"github.com/gocolly/colly/v2"
 	"gorm.io/gorm"
@@ -20,6 +22,36 @@ var ProviderURL = "https://komikindo.ch/"
 // halaman dihapus provider, atau struktur HTML-nya berubah.
 var ErrNotFound = errors.New("data tidak ditemukan di provider")
 
+// base menyimpan pengaturan bersama. Setiap scraping memakai base.Clone(),
+// yang berbagi HTTP client dan LimitRule, jadi batas koneksi ke provider
+// berlaku untuk seluruh aplikasi, bukan per request.
+var base = func() *colly.Collector {
+	c := colly.NewCollector(
+		// User-Agent bawaan Colly gampang diblokir Cloudflare.
+		colly.UserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36"),
+	)
+	c.SetRequestTimeout(20 * time.Second)
+	c.Limit(&colly.LimitRule{DomainGlob: "*", Parallelism: 4})
+	return c
+}()
+
+// lastSuccess waktu (unix detik) scraping terakhir yang berhasil membaca data,
+// dilaporkan /health. Port provider yang terbuka belum berarti scraping jalan.
+var lastSuccess atomic.Int64
+
+// LastSuccess mengembalikan waktu scraping terakhir yang berhasil, atau waktu
+// nol kalau belum pernah.
+func LastSuccess() time.Time {
+	if v := lastSuccess.Load(); v > 0 {
+		return time.Unix(v, 0)
+	}
+	return time.Time{}
+}
+
+func markSuccess() {
+	lastSuccess.Store(time.Now().Unix())
+}
+
 type ScraperKomikindo struct {
 	db *gorm.DB
 }
@@ -30,12 +62,70 @@ func NewScraperKomikindo(db *gorm.DB) *ScraperKomikindo {
 	}
 }
 
+// FetchPopuler mengambil komik populer dari slider halaman depan provider.
+func FetchPopuler() ([]model_komik.Komik, error) {
+	return fetchCards(ProviderURL, "div.odadingslider")
+}
+
+// Search mencari komik lewat halaman pencarian provider.
+func Search(keyword string) ([]model_komik.Komik, error) {
+	return fetchCards(ProviderURL+"?s="+url.QueryEscape(keyword), ".film-list")
+}
+
+// fetchCards membaca kartu komik (.animepost) di dalam container tertentu.
+func fetchCards(pageURL, container string) ([]model_komik.Komik, error) {
+
+	var list []model_komik.Komik
+
+	cly := base.Clone()
+
+	cly.OnHTML(container, func(e *colly.HTMLElement) {
+		e.ForEach(".animepost", func(i int, el *colly.HTMLElement) {
+			link := el.ChildAttr(".animposx>a", "href")
+
+			slug, ok := slugFromURL(link)
+			if !ok {
+				return
+			}
+
+			list = append(list, model_komik.Komik{
+				Title:  el.ChildAttr(".animposx>a", "title"),
+				ImgUrl: el.ChildAttr(".animposx>a img", "src"),
+				Slug:   slug,
+			})
+		})
+	})
+
+	log.Println("Scraping:", pageURL)
+
+	if err := cly.Visit(pageURL); err != nil {
+		return nil, err
+	}
+
+	if len(list) == 0 {
+		return nil, ErrNotFound
+	}
+
+	markSuccess()
+	return list, nil
+}
+
+// slugFromURL mengambil segmen terakhir URL provider, mis.
+// https://komikindo.ch/komik/worst/ -> worst.
+func slugFromURL(link string) (string, bool) {
+	u, err := url.Parse(link)
+	if err != nil || strings.Trim(u.Path, "/") == "" {
+		return "", false
+	}
+	return path.Base(u.Path), true
+}
+
 // FetchKomik mengambil info komik beserta daftar chapter-nya dari provider.
 func FetchKomik(slugKomik string) (model_komik.Komik, error) {
 
 	komik := model_komik.Komik{Slug: slugKomik}
 
-	cly := colly.NewCollector()
+	cly := base.Clone()
 
 	cly.OnHTML(".infoanime", func(e *colly.HTMLElement) {
 		komik.Title = strings.Join(strings.Fields(e.ChildText(".entry-title")), " ")
@@ -54,14 +144,14 @@ func FetchKomik(slugKomik string) (model_komik.Komik, error) {
 			// Slug diambil dari URL chapter, bukan dibuat dari judul: judul
 			// seperti "HiGH & LOW" menjadi "high-and-low" padahal URL
 			// provider-nya "high-low", sehingga panelnya tidak bisa dibuka.
-			href, err := url.Parse(el.ChildAttr("a", "href"))
-			if err != nil || strings.Trim(href.Path, "/") == "" {
+			slugChapter, ok := slugFromURL(el.ChildAttr("a", "href"))
+			if !ok {
 				return
 			}
 
 			komik.KomikChapter = append(komik.KomikChapter, model_komik.KomikChapter{
 				Title:       el.ChildAttr("a", "title"),
-				SlugChapter: path.Base(href.Path),
+				SlugChapter: slugChapter,
 			})
 		})
 	})
@@ -77,6 +167,7 @@ func FetchKomik(slugKomik string) (model_komik.Komik, error) {
 		return komik, ErrNotFound
 	}
 
+	markSuccess()
 	return komik, nil
 }
 
@@ -85,7 +176,7 @@ func FetchPanels(chapter string) ([]model_komik.KomikPanel, error) {
 
 	var panels []model_komik.KomikPanel
 
-	cly := colly.NewCollector()
+	cly := base.Clone()
 
 	cly.OnHTML("div#chimg-auh", func(e *colly.HTMLElement) {
 		for _, img := range e.ChildAttrs("img", "src") {
@@ -108,6 +199,7 @@ func FetchPanels(chapter string) ([]model_komik.KomikPanel, error) {
 		return nil, ErrNotFound
 	}
 
+	markSuccess()
 	return panels, nil
 }
 

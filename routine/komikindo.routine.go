@@ -38,6 +38,9 @@ func scraperSavedKomik(db *gorm.DB, scraperKomikindo *scraper.ScraperKomikindo) 
 
 		for _, v := range dataKomik {
 			scraperKomikindo.ScrapeChapterKomik(v)
+
+			// Jeda antar komik supaya provider tidak menganggap ini serangan.
+			time.Sleep(2 * time.Second)
 		}
 
 	}

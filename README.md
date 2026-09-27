@@ -97,6 +97,9 @@ komikindo-scraper/
 
 ## 🚀 Instalasi & Setup
 
+Untuk production pakai Docker, lihat [DEPLOY.md](DEPLOY.md). Langkah di bawah
+untuk menjalankan langsung dengan Go saat development.
+
 ### Prasyarat
 
 - [Go](https://go.dev/dl/) >= 1.21

@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"komikindo-scraper/helpers"
+	"komikindo-scraper/scraper"
 	"net/http"
 	"time"
 
@@ -34,9 +35,23 @@ func (controller *HealthController) Health(c *gin.Context) {
 		httpStatus = http.StatusServiceUnavailable
 	}
 
+	// Frontend memanggil /health tiap menit untuk setiap pengunjung, jadi
+	// koneksi ke provider cukup dicek sekali per menit.
+	providerUp, _ := cached("health:provider", time.Minute, func() (bool, error) {
+		return helpers.CheckKomikindoConnection(), nil
+	})
+
 	providerStatus := "down"
-	if helpers.CheckKomikindoConnection() {
+	if providerUp {
 		providerStatus = "up"
+	}
+
+	// Port provider yang terbuka belum berarti scraping jalan (mis. diblokir
+	// Cloudflare atau HTML-nya berubah), jadi waktu scraping terakhir yang
+	// berhasil ikut dilaporkan.
+	var lastScrapeOK *time.Time
+	if t := scraper.LastSuccess(); !t.IsZero() {
+		lastScrapeOK = &t
 	}
 
 	c.JSON(httpStatus, helpers.APIResponse(
@@ -44,10 +59,11 @@ func (controller *HealthController) Health(c *gin.Context) {
 		httpStatus == http.StatusOK,
 		"Status layanan",
 		gin.H{
-			"database": dbStatus,
-			"provider": providerStatus,
-			"uptime":   time.Since(controller.startedAt).Round(time.Second).String(),
-			"time":     time.Now().Format(time.RFC3339),
+			"database":       dbStatus,
+			"provider":       providerStatus,
+			"last_scrape_ok": lastScrapeOK,
+			"uptime":         time.Since(controller.startedAt).Round(time.Second).String(),
+			"time":           time.Now().Format(time.RFC3339),
 		},
 	))
 }

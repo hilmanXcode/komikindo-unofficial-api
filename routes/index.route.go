@@ -30,8 +30,6 @@ func InitRoute(app *gin.Engine, db *gorm.DB) {
 		MaxAge:           12 * time.Hour,
 	}))
 
-	route.Use(gin.Recovery())
-
 	// Health check dibiarkan publik supaya uptime monitor tidak perlu API key.
 	route.GET("/health", healthController.Health)
 
@@ -103,6 +101,4 @@ func InitRoute(app *gin.Engine, db *gorm.DB) {
 		admin.GET("/users", userController.ListUsers)
 		admin.PATCH("/users/:id", userController.UpdateUser)
 	}
-
-	app.Run(":" + config.PORT)
 }
