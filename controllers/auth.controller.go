@@ -45,6 +45,10 @@ type changePasswordInput struct {
 	NewPassword string `json:"new_password" binding:"required,min=8,max=72"`
 }
 
+// refreshReuseGrace adalah jeda setelah rotasi di mana refresh token lama yang
+// dipakai lagi dianggap request paralel, bukan pencurian token.
+const refreshReuseGrace = 30 * time.Second
+
 type tokenPair struct {
 	AccessToken  string           `json:"access_token"`
 	RefreshToken string           `json:"refresh_token"`
@@ -97,6 +101,18 @@ func (controller *AuthController) Register(c *gin.Context) {
 	}
 
 	if err := controller.db.Create(&user).Error; err != nil {
+		// Pendaftaran lain dengan username/email sama lolos pengecekan di atas
+		// lebih dulu.
+		if errors.Is(err, gorm.ErrDuplicatedKey) {
+			c.JSON(http.StatusConflict, helpers.APIResponse(
+				http.StatusConflict,
+				false,
+				"Username atau email sudah terdaftar",
+				nil,
+			))
+			return
+		}
+
 		internalError(c, "Gagal membuat akun")
 		return
 	}
@@ -216,9 +232,18 @@ func (controller *AuthController) Refresh(c *gin.Context) {
 		return
 	}
 
+	// Browser sering mengirim beberapa request paralel dengan refresh token yang
+	// sama. Yang kalah balapan dibalas 409, bukan 401, supaya klien tidak
+	// menghapus cookie sesi yang baru saja diperbarui request pemenangnya.
+	if stored.RevokedAt != nil && time.Since(*stored.RevokedAt) < refreshReuseGrace {
+		refreshConflict(c)
+		return
+	}
+
 	if !stored.IsUsable() {
-		// Refresh token yang sudah dicabut tapi dipakai lagi adalah tanda token
-		// bocor: cabut semua sesi user supaya penyerang ikut tertendang.
+		// Refresh token yang sudah dicabut tapi dipakai lagi setelah masa
+		// tenggang adalah tanda token bocor: cabut semua sesi user supaya
+		// penyerang ikut tertendang.
 		if stored.RevokedAt != nil {
 			controller.revokeAllSessions(stored.UserID)
 		}
@@ -243,8 +268,18 @@ func (controller *AuthController) Refresh(c *gin.Context) {
 		return
 	}
 
-	now := time.Now()
-	controller.db.Model(&stored).Update("revoked_at", now)
+	// Dicabut secara atomik: dari beberapa request dengan token yang sama,
+	// hanya satu yang boleh menerbitkan pasangan token baru.
+	revoked := controller.db.Model(&stored).Where("revoked_at IS NULL").Update("revoked_at", time.Now())
+	if revoked.Error != nil {
+		internalError(c, "Gagal memperbarui token")
+		return
+	}
+
+	if revoked.RowsAffected == 0 {
+		refreshConflict(c)
+		return
+	}
 
 	pair, err := controller.issueTokenPair(c, &user)
 	if err != nil {
@@ -473,6 +508,15 @@ func (controller *AuthController) revokeAllSessions(userID uint) {
 	controller.db.Model(&model_user.RefreshToken{}).
 		Where("user_id = ? AND revoked_at IS NULL", userID).
 		Update("revoked_at", time.Now())
+}
+
+func refreshConflict(c *gin.Context) {
+	c.JSON(http.StatusConflict, helpers.APIResponse(
+		http.StatusConflict,
+		false,
+		"Refresh token sedang diperbarui oleh request lain",
+		nil,
+	))
 }
 
 func truncate(s string, max int) string {

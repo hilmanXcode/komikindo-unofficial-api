@@ -18,10 +18,12 @@ func KomikindoRoutine(db *gorm.DB) {
 }
 
 func scraperSavedKomik(db *gorm.DB, scraperKomikindo *scraper.ScraperKomikindo) {
-	ticker := time.NewTicker(12 * time.Second)
+	ticker := time.NewTicker(12 * time.Hour)
 	defer ticker.Stop()
 
-	for range ticker.C {
+	// Putaran pertama langsung jalan saat start, supaya server yang sering
+	// restart tetap sempat memperbarui chapter.
+	for ; ; <-ticker.C {
 
 		var dataKomik []model_komik.Komik
 

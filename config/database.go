@@ -10,7 +10,9 @@ import (
 )
 
 func InitDatabase() *gorm.DB {
-	db, err := gorm.Open(mysql.Open(DSN), &gorm.Config{})
+	// TranslateError supaya pelanggaran unique index bisa dikenali lewat
+	// gorm.ErrDuplicatedKey, bukan kode error khusus MySQL.
+	db, err := gorm.Open(mysql.Open(DSN), &gorm.Config{TranslateError: true})
 
 	if err != nil {
 		log.Fatal("Gagal terkoneksi ke database ", err)
@@ -18,7 +20,9 @@ func InitDatabase() *gorm.DB {
 
 	log.Println("Berhasil terkoneksi dengan database")
 
-	db.AutoMigrate(
+	// Skema yang gagal dimigrasi membuat query gagal diam-diam di tempat lain,
+	// jadi lebih baik server tidak start sama sekali.
+	err = db.AutoMigrate(
 		&model_komik.Komik{},
 		&model_komik.KomikChapter{},
 		&model_komik.KomikPanel{},
@@ -27,6 +31,10 @@ func InitDatabase() *gorm.DB {
 		&model_user.Bookmark{},
 		&model_user.ReadingHistory{},
 	)
+
+	if err != nil {
+		log.Fatal("Gagal migrasi database ", err)
+	}
 
 	return db
 }

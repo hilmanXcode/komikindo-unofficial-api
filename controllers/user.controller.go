@@ -138,7 +138,9 @@ func (controller *UserController) DeleteBookmark(c *gin.Context) {
 
 	slugKomik := c.Param("slug")
 
-	result := controller.db.
+	// Hapus permanen: baris soft delete tetap memegang unique index
+	// (user_id, komik_slug), sehingga komik yang sama tidak bisa disimpan lagi.
+	result := controller.db.Unscoped().
 		Where("user_id = ? AND komik_slug = ?", user.ID, slugKomik).
 		Delete(&model_user.Bookmark{})
 
@@ -258,7 +260,9 @@ func (controller *UserController) DeleteHistory(c *gin.Context) {
 
 	slugKomik := c.Param("slug")
 
-	result := controller.db.
+	// Hapus permanen: baris soft delete tetap memegang unique index
+	// (user_id, komik_slug), sehingga komik yang sama tidak bisa disimpan lagi.
+	result := controller.db.Unscoped().
 		Where("user_id = ? AND komik_slug = ?", user.ID, slugKomik).
 		Delete(&model_user.ReadingHistory{})
 
