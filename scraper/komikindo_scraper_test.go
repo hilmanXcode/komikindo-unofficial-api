@@ -116,6 +116,17 @@ func TestFetch(t *testing.T) {
 		}
 	}
 
+	// Collector dipakai bersama; URL yang sama harus bisa diambil lagi
+	// (cache habis, routine putaran berikutnya).
+	for i := range 2 {
+		if _, err := FetchPopuler(); err != nil {
+			t.Fatalf("populer ke-%d: %v", i+1, err)
+		}
+		if _, err := FetchKomik("high-low"); err != nil {
+			t.Fatalf("komik ke-%d: %v", i+1, err)
+		}
+	}
+
 	if _, err := Search("tidak-ada"); !errors.Is(err, ErrNotFound) {
 		t.Errorf("pencarian kosong: err = %v, mau ErrNotFound", err)
 	}

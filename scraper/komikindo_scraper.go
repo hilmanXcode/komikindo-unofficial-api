@@ -29,6 +29,10 @@ var base = func() *colly.Collector {
 	c := colly.NewCollector(
 		// User-Agent bawaan Colly gampang diblokir Cloudflare.
 		colly.UserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36"),
+		// Clone() berbagi daftar URL yang sudah dikunjungi. Tanpa ini, setiap
+		// URL hanya bisa di-scrape sekali selama proses hidup: populer gagal
+		// setelah cache habis, dan routine gagal di putaran kedua.
+		colly.AllowURLRevisit(),
 	)
 	c.SetRequestTimeout(20 * time.Second)
 	c.Limit(&colly.LimitRule{DomainGlob: "*", Parallelism: 4})
