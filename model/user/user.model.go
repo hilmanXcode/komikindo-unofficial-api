@@ -63,6 +63,13 @@ type Bookmark struct {
 	KomikSlug string `gorm:"type:varchar(200);not null;uniqueIndex:idx_user_bookmark" json:"komik_slug"`
 	Title     string `gorm:"type:varchar(255)" json:"title"`
 	ImgUrl    string `gorm:"type:varchar(500)" json:"imgurl"`
+
+	// Bukan kolom tabel ini: diisi GetBookmarks dari tabel komiks dan
+	// reading_histories (read-only, tidak ikut migrasi).
+	LastChapterAt    *time.Time `gorm:"->;-:migration" json:"last_chapter_at"`
+	LastChapterSlug  string     `gorm:"->;-:migration" json:"last_chapter_slug"`
+	LastChapterTitle string     `gorm:"->;-:migration" json:"last_chapter_title"`
+	HasUpdate        bool       `gorm:"->;-:migration" json:"has_update"`
 }
 
 // ReadingHistory menyimpan satu baris per (user, komik): chapter terakhir yang

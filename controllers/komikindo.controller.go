@@ -28,7 +28,8 @@ func NewKomikindoController(db *gorm.DB) *KomikindoController {
 
 // GetAllScrapedKomik mengembalikan komik yang sudah tersimpan di database.
 //
-// Mendukung query `q` (cari judul), `status`, `page`, dan `limit`. Tanpa `page`
+// Mendukung query `q` (cari judul), `status`, `sort=update`, `page`, dan
+// `limit`. Tanpa `page`
 // atau `limit` endpoint ini tetap mengembalikan seluruh data seperti versi
 // sebelumnya, supaya klien lama tidak ikut berubah perilakunya.
 func (controller *KomikindoController) GetAllScrapedKomik(c *gin.Context) {
@@ -45,12 +46,20 @@ func (controller *KomikindoController) GetAllScrapedKomik(c *gin.Context) {
 		query = query.Where("status = ?", status)
 	}
 
+	// sort=update: komik yang chapter barunya paling akhir ditemukan routine.
+	// Datanya dari database, jadi tetap tampil walau provider sedang down.
+	order := "title asc"
+	if c.Query("sort") == "update" {
+		query = query.Where("last_chapter_at IS NOT NULL")
+		order = "last_chapter_at desc"
+	}
+
 	// Session() supaya query bisa dipakai ulang untuk Count dan Find tanpa
 	// kondisi dari pemanggilan pertama ikut terbawa.
 	query = query.Session(&gorm.Session{})
 
 	if !isPaginated(c) {
-		if query.Find(&dataKomik).Error != nil {
+		if query.Order(order).Find(&dataKomik).Error != nil {
 			c.JSON(
 				http.StatusInternalServerError,
 				helpers.APIResponse(
@@ -82,7 +91,7 @@ func (controller *KomikindoController) GetAllScrapedKomik(c *gin.Context) {
 	query.Count(&total)
 
 	err := query.
-		Order("title asc").
+		Order(order).
 		Limit(limit).
 		Offset((page - 1) * limit).
 		Find(&dataKomik).Error

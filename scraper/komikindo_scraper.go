@@ -261,4 +261,18 @@ func (s *ScraperKomikindo) ScrapeChapterKomik(komik model_komik.Komik) {
 	}
 
 	log.Printf("%d chapter baru tersimpan untuk %s", len(added), komik.Slug)
+
+	// Chapter yang hanya berganti slug (added dan stale sama banyak) bukan
+	// chapter baru. Provider mengurutkan chapter dari yang terbaru.
+	if len(added) > len(stale) {
+		latest := fetched.KomikChapter[0]
+		err = s.db.Model(&komik).Updates(map[string]interface{}{
+			"last_chapter_at":    time.Now(),
+			"last_chapter_slug":  latest.SlugChapter,
+			"last_chapter_title": latest.Title,
+		}).Error
+		if err != nil {
+			log.Println("Gagal menandai chapter terbaru untuk", komik.Slug, ":", err)
+		}
+	}
 }

@@ -5,6 +5,7 @@ import (
 	"komikindo-scraper/middleware"
 	model_komik "komikindo-scraper/model/komik"
 	model_user "komikindo-scraper/model/user"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -37,7 +38,15 @@ type historyInput struct {
 	LastPanel    int    `json:"last_panel" binding:"min=0"`
 }
 
-// GetBookmarks menampilkan komik yang di-bookmark user, terbaru lebih dulu.
+// bookmarkHasUpdate bernilai true kalau routine menemukan chapter baru setelah
+// user terakhir membaca komik itu, atau setelah menyimpannya kalau belum pernah
+// dibaca. Membaca chapter apa pun dari komik itu menghapus penandanya.
+const bookmarkHasUpdate = "COALESCE(k.last_chapter_at > COALESCE(h.last_read_at, bookmarks.created_at), FALSE)"
+
+// GetBookmarks menampilkan komik yang di-bookmark user. Yang punya chapter
+// baru tampil lebih dulu, sisanya terbaru disimpan. Query `has_update=1`
+// hanya menampilkan yang punya chapter baru; meta.total-nya dipakai frontend
+// sebagai jumlah notifikasi.
 func (controller *UserController) GetBookmarks(c *gin.Context) {
 
 	user, ok := middleware.CurrentUser(c)
@@ -48,18 +57,31 @@ func (controller *UserController) GetBookmarks(c *gin.Context) {
 
 	page, limit := parsePagination(c, 20)
 
+	// Join satu-satu: slug komik unik, dan riwayat unik per (user, komik).
+	query := controller.db.Model(&model_user.Bookmark{}).
+		Joins("LEFT JOIN komiks k ON k.slug = bookmarks.komik_slug AND k.deleted_at IS NULL").
+		Joins("LEFT JOIN reading_histories h ON h.user_id = bookmarks.user_id AND h.komik_slug = bookmarks.komik_slug AND h.deleted_at IS NULL").
+		Where("bookmarks.user_id = ?", user.ID)
+
+	if c.Query("has_update") == "1" {
+		query = query.Where(bookmarkHasUpdate)
+	}
+
+	query = query.Session(&gorm.Session{})
+
 	var total int64
-	controller.db.Model(&model_user.Bookmark{}).Where("user_id = ?", user.ID).Count(&total)
+	query.Count(&total)
 
 	var bookmarks []model_user.Bookmark
-	err := controller.db.
-		Where("user_id = ?", user.ID).
-		Order("created_at desc").
+	err := query.
+		Select("bookmarks.*, k.last_chapter_at, k.last_chapter_slug, k.last_chapter_title, " + bookmarkHasUpdate + " AS has_update").
+		Order("has_update desc, bookmarks.created_at desc").
 		Limit(limit).
 		Offset((page - 1) * limit).
 		Find(&bookmarks).Error
 
 	if err != nil {
+		log.Println("Gagal mengambil bookmark:", err)
 		internalError(c, "Gagal mengambil data bookmark")
 		return
 	}
