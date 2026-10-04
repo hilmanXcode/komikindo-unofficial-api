@@ -38,7 +38,7 @@ func (controller *HealthController) Health(c *gin.Context) {
 	// Frontend memanggil /health tiap menit untuk setiap pengunjung, jadi
 	// koneksi ke provider cukup dicek sekali per menit.
 	providerUp, _ := cached("health:provider", time.Minute, func() (bool, error) {
-		return helpers.CheckKomikindoConnection(), nil
+		return scraper.CheckConnection(), nil
 	})
 
 	providerStatus := "down"
@@ -61,6 +61,7 @@ func (controller *HealthController) Health(c *gin.Context) {
 		gin.H{
 			"database":       dbStatus,
 			"provider":       providerStatus,
+			"providers":      scraper.ProviderNames(),
 			"last_scrape_ok": lastScrapeOK,
 			"uptime":         time.Since(controller.startedAt).Round(time.Second).String(),
 			"time":           time.Now().Format(time.RFC3339),

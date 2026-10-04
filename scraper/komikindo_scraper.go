@@ -4,6 +4,7 @@ import (
 	"errors"
 	model_komik "komikindo-scraper/model/komik"
 	"log"
+	"net"
 	"net/url"
 	"path"
 	"strings"
@@ -60,6 +61,22 @@ type ScraperKomikindo struct {
 	db *gorm.DB
 }
 
+// komikindoProvider membungkus scraper komikindo.ch sebagai salah satu Provider.
+type komikindoProvider struct{}
+
+func (komikindoProvider) Name() string { return "komikindo" }
+
+func (komikindoProvider) CheckConnection() bool {
+	_, err := net.DialTimeout("tcp", "komikindo.ch:443", time.Second)
+	return err == nil
+}
+
+// OwnsChapter menandai slug chapter komikindo, yaitu yang tidak memakai
+// pemisah khusus seperti narasininja.
+func (komikindoProvider) OwnsChapter(chapter string) bool {
+	return chapter != "" && !strings.Contains(chapter, chapterSlugSeparator)
+}
+
 func NewScraperKomikindo(db *gorm.DB) *ScraperKomikindo {
 	return &ScraperKomikindo{
 		db: db,
@@ -67,12 +84,12 @@ func NewScraperKomikindo(db *gorm.DB) *ScraperKomikindo {
 }
 
 // FetchPopuler mengambil komik populer dari slider halaman depan provider.
-func FetchPopuler() ([]model_komik.Komik, error) {
+func (komikindoProvider) Populer() ([]model_komik.Komik, error) {
 	return fetchCards(ProviderURL, "div.odadingslider")
 }
 
 // Search mencari komik lewat halaman pencarian provider.
-func Search(keyword string) ([]model_komik.Komik, error) {
+func (komikindoProvider) Search(keyword string) ([]model_komik.Komik, error) {
 	return fetchCards(ProviderURL+"?s="+url.QueryEscape(keyword), ".film-list")
 }
 
@@ -125,7 +142,7 @@ func slugFromURL(link string) (string, bool) {
 }
 
 // FetchKomik mengambil info komik beserta daftar chapter-nya dari provider.
-func FetchKomik(slugKomik string) (model_komik.Komik, error) {
+func (komikindoProvider) Komik(slugKomik string) (model_komik.Komik, error) {
 
 	komik := model_komik.Komik{Slug: slugKomik}
 
@@ -176,7 +193,7 @@ func FetchKomik(slugKomik string) (model_komik.Komik, error) {
 }
 
 // FetchPanels mengambil semua gambar panel dari satu chapter.
-func FetchPanels(chapter string) ([]model_komik.KomikPanel, error) {
+func (komikindoProvider) Panels(chapter string) ([]model_komik.KomikPanel, error) {
 
 	var panels []model_komik.KomikPanel
 
@@ -211,7 +228,15 @@ func FetchPanels(chapter string) ([]model_komik.KomikPanel, error) {
 // database, dan menandai komik yang sudah tamat supaya tidak di-scrape lagi.
 func (s *ScraperKomikindo) ScrapeChapterKomik(komik model_komik.Komik) {
 
-	fetched, err := FetchKomik(komik.Slug)
+	// Pakai provider yang memiliki chapter yang sudah tersimpan, bukan provider
+	// utama. Kalau tidak, komik dari provider yang sedang down akan ditimpa
+	// chapter dari provider cadangan yang slug-nya berbeda format.
+	provider := ProviderForChapters(komik.KomikChapter)
+	if provider == nil {
+		provider = PrimaryProvider()
+	}
+
+	fetched, err := provider.Komik(komik.Slug)
 	if err != nil {
 		log.Println("Gagal scraping", komik.Slug, ":", err)
 		return

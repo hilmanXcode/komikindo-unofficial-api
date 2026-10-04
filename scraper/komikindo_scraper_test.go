@@ -52,6 +52,9 @@ const homePage = `<html><body><div class="odadingslider">` + card + `</div></bod
 const searchPage = `<html><body><div class="film-list">` + card + `</div></body></html>`
 
 func TestFetch(t *testing.T) {
+	SetProvider(NewProvider("komikindo"))
+	t.Cleanup(func() { SetProvider(NewProvider("komikindo")) })
+
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/komik/high-low":

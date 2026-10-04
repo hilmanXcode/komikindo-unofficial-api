@@ -4,13 +4,14 @@ import (
 	"context"
 	"errors"
 	"komikindo-scraper/config"
-	"komikindo-scraper/helpers"
 	"komikindo-scraper/routes"
 	"komikindo-scraper/routine"
+	"komikindo-scraper/scraper"
 	"log"
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -23,10 +24,16 @@ func BootstrapApp() {
 
 	config.LoadEnvVariables()
 
+	// Rantai provider dipasang sebelum routine dan route jalan. Provider
+	// cadangan dipakai otomatis kalau provider utama down.
+	names := append([]string{config.MANGA_PROVIDER}, config.MANGA_PROVIDER_FALLBACK...)
+	scraper.SetProviders(scraper.NewProviders(names...)...)
+	log.Println("Provider manga aktif:", strings.Join(scraper.ProviderNames(), " -> "))
+
 	// Provider yang sedang down tidak boleh membuat API gagal start: data yang
 	// sudah ada di database tetap bisa dilayani, dan /health yang melaporkannya.
-	if providerIsOk := helpers.CheckKomikindoConnection(); !providerIsOk {
-		log.Println("Peringatan: koneksi ke komikindo gagal, endpoint scraping tidak akan bekerja")
+	if providerIsOk := scraper.CheckConnection(); !providerIsOk {
+		log.Println("Peringatan: koneksi ke provider gagal, endpoint scraping tidak akan bekerja")
 	}
 
 	db := config.InitDatabase()

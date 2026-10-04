@@ -40,6 +40,14 @@ var (
 	// TRUSTED_PROXIES daftar proxy yang header X-Forwarded-For-nya dipercaya.
 	// Kosong berarti percaya semua (default Gin).
 	TRUSTED_PROXIES []string
+
+	// MANGA_PROVIDER menentukan sumber data manga utama: "komikindo" (default)
+	// atau "narasininja".
+	MANGA_PROVIDER string
+
+	// MANGA_PROVIDER_FALLBACK daftar provider cadangan (dipisah koma) yang
+	// dicoba kalau provider utama down, mis. "narasininja".
+	MANGA_PROVIDER_FALLBACK []string
 )
 
 func LoadEnvVariables() {
@@ -82,6 +90,9 @@ func LoadEnvVariables() {
 	RATE_LIMIT_BURST = getEnvInt("RATE_LIMIT_BURST", 30)
 
 	TRUSTED_PROXIES = getEnvList("TRUSTED_PROXIES", nil)
+
+	MANGA_PROVIDER = getEnv("MANGA_PROVIDER", "komikindo")
+	MANGA_PROVIDER_FALLBACK = getEnvList("MANGA_PROVIDER_FALLBACK", []string{"narasininja"})
 }
 
 // getEnvList membaca daftar yang dipisah koma, mis. "a.com, b.com".

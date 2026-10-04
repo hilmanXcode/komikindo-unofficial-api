@@ -35,7 +35,7 @@ REST API tidak resmi untuk mengambil data komik dari [Komikindo](https://komikin
                       ┌──────────────┐               │
                       │  Colly       │───────────────┘
                       │  Scraper     │
-                      │  (komikindo) │
+                      │  (provider)  │
                       └──────────────┘
 ```
 
@@ -43,10 +43,25 @@ REST API tidak resmi untuk mengambil data komik dari [Komikindo](https://komikin
 
 1. **Request masuk** → melewati middleware **Rate Limiter** (max 2 req/s, burst 5) dan **API Key** validation.
 2. **Cek database** — Controller pertama kali cek apakah data sudah ada di database (MySQL via GORM).
-3. **Cache miss** — Jika data belum ada, Colly akan melakukan scraping langsung ke website Komikindo.
+3. **Cache miss** — Jika data belum ada, Colly akan melakukan scraping langsung ke website provider aktif (default: NarasiNinja).
 4. **Simpan ke DB** — Hasil scraping disimpan ke database untuk request selanjutnya (caching layer).
 5. **Background routine** — Goroutine berjalan setiap **12 jam** untuk update chapter terbaru dari komik yang statusnya masih "Berjalan".
 6. **IP Cleanup** — Goroutine terpisah membersihkan data IP dari rate limiter setiap 1 menit untuk IP yang tidak aktif selama 3 menit.
+
+### Sumber Data (Provider)
+
+Sumber data manga dipilih lewat `MANGA_PROVIDER`, dengan cadangan lewat
+`MANGA_PROVIDER_FALLBACK`. Setiap provider mengembalikan model yang sama, jadi
+bentuk response API tidak berubah:
+
+- `komikindo` (default) — https://komikindo.ch/
+- `narasininja` — https://narasininja.net/
+
+Kalau provider utama down atau komiknya tidak ditemukan, provider cadangan
+dicoba otomatis. Contoh default: `MANGA_PROVIDER="komikindo"` dengan
+`MANGA_PROVIDER_FALLBACK="narasininja"`. Chapter yang sudah tersimpan tetap
+di-refresh memakai provider asalnya, supaya data tidak saling menimpa saat
+failover.
 
 ---
 
@@ -69,8 +84,7 @@ komikindo-scraper/
 ├── helpers/
 │   ├── response.go                  # Standar format response JSON
 │   ├── auth.go                      # bcrypt, token acak, hash
-│   ├── jwt.go                       # Pembuatan & validasi access token
-│   └── utils.go                     # Utility (cek koneksi provider)
+│   └── jwt.go                       # Pembuatan & validasi access token
 ├── middleware/
 │   ├── apikey.go                    # Middleware autentikasi API Key
 │   ├── auth.go                      # Middleware JWT: RequireAuth, RequireRole
@@ -83,7 +97,9 @@ komikindo-scraper/
 ├── routes/
 │   └── index.route.go               # Definisi semua route API
 ├── scraper/
-│   └── komikindo_scraper.go         # Background scraper untuk update chapter
+│   ├── scraper.go                   # Interface Provider & pemilihan sumber data
+│   ├── komikindo_scraper.go         # Scraper komikindo.ch
+│   └── narasininja_scraper.go       # Scraper narasininja.net
 ├── routine/
 │   ├── komikindo.routine.go         # Routine update chapter berkala
 │   └── auth.routine.go              # Routine pembersihan refresh token
@@ -139,6 +155,8 @@ untuk menjalankan langsung dengan Go saat development.
    | `LOGIN_LOCK_DURATION` | ❌    | `15m`   | Lama akun dikunci                             |
    | `PORT`                | ❌    | `8000`  | Port HTTP server                              |
    | `CORS_ORIGINS`        | ❌    | localhost 5173/4173 + domain produksi | Origin browser yang diizinkan, dipisah koma |
+   | `MANGA_PROVIDER`      | ❌    | `komikindo` | Sumber data manga: `komikindo` atau `narasininja` |
+   | `MANGA_PROVIDER_FALLBACK` | ❌ | `narasininja` | Provider cadangan saat provider utama down, dipisah koma |
    | `RATE_LIMIT_RPS`      | ❌    | `10`    | Request per detik per IP untuk `/v1`          |
    | `RATE_LIMIT_BURST`    | ❌    | `30`    | Burst rate limit `/v1`                        |
    | `TRUSTED_PROXIES`     | ❌    | semua   | Proxy yang `X-Forwarded-For`-nya dipercaya, dipisah koma |
